@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920, height=1080">
+  <title>Stream Overlay</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; padding: 0; background: transparent !important; }
+    body { display: flex; flex-direction: column; font-family: system-ui, sans-serif; }
+    .marquee-inner { width: max-content; }
+    @keyframes marquee { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+  </style>
+</head>
+<body>
+  <div style="flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;">
+    
+    <div style="flex:1;min-height:0;"></div>
+  </div>
+  <div style="flex-shrink:0;"></div>
+</body>
+</html>
