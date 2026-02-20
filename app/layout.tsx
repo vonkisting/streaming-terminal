@@ -2,13 +2,14 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { ConvexClientProvider } from "./providers";
-import { AuthProvider } from "./auth-provider";
+import Layout from "@/components/Layout";
+import OBSConnectionScripts from "@/components/OBSConnectionScripts";
 
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "Streaming Terminal",
-  description: "A Next.js app with authentication and Convex",
+  description: "Streaming Terminal",
 };
 
 export default function RootLayout({
@@ -19,10 +20,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
+        <OBSConnectionScripts />
         <ConvexClientProvider>
-          <AuthProvider>
-            {children}
-          </AuthProvider>
+          <Layout />
         </ConvexClientProvider>
       </body>
     </html>
