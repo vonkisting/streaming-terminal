@@ -49,7 +49,18 @@ function getStoredData(): Record<string, TournamentData> {
   }
 }
 
-export default function EventAndMatchupEditor() {
+interface EventAndMatchupEditorProps {
+  renderSections?: (sections: {
+    eventMatchup: React.ReactNode;
+    standings: React.ReactNode;
+    playerList: React.ReactNode;
+    paths: React.ReactNode;
+    fontSizes: React.ReactNode;
+  }) => React.ReactNode;
+  renderMarqueeRow?: (marqueeContent: React.ReactNode) => React.ReactNode;
+}
+
+export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow }: EventAndMatchupEditorProps = {}) {
   const { setMarquee, setMarqueePath, setMatchupCardPath, marqueePath, matchupCardPath } = useMarquee();
   const [savedEvents, setSavedEvents] = useState<Record<string, TournamentData>>({});
   const [loadedEventKey, setLoadedEventKey] = useState<string | null>(null);
@@ -84,7 +95,6 @@ export default function EventAndMatchupEditor() {
   const [eventMatchupSectionExpanded, setEventMatchupSectionExpanded] = useState(true);
   const [pathsExpanded, setPathsExpanded] = useState(true);
   const [matchupCardExpanded, setMatchupCardExpanded] = useState(true);
-  const [refreshMarqueeError, setRefreshMarqueeError] = useState<string | null>(null);
   const [showNameTakenModal, setShowNameTakenModal] = useState(false);
   const [lastMarqueeUploadAt, setLastMarqueeUploadAt] = useState<string | null>(null);
   const [showCopyNotification, setShowCopyNotification] = useState(false);
@@ -301,45 +311,52 @@ export default function EventAndMatchupEditor() {
           const marqueeUrlForObs = `${base}/marquee.html?v=${encodeURIComponent(cacheBust)}`;
           const matchupCardUrlForObs = `${base}/matchupcard.html?v=${encodeURIComponent(cacheBust)}`;
 
+          const ensureBrowserAndSetUrl = async (
+            sceneName: string,
+            listData: { sceneItems?: { sceneItemId: number; sourceName?: string }[] },
+            inputName: string,
+            url: string,
+          ) => {
+            let items = listData?.sceneItems ?? [];
+            let item = items.find((i) => i.sourceName === inputName);
+            if (item == null) {
+              try {
+                await win.obsRequest!("CreateInput", {
+                  sceneName,
+                  inputName,
+                  inputKind: "browser_source",
+                  inputSettings: { url, width: 1920, height: 1080 },
+                });
+              } catch (createErr) {
+                const errMsg = String(createErr ?? "");
+                if (errMsg.includes("already") || errMsg.includes("exists")) {
+                  await win.obsRequest!("CreateSceneItem", { sceneName, sourceName: inputName }).catch(() => {});
+                }
+              }
+              const next = (await win.obsRequest!("GetSceneItemList", { sceneName })) as { sceneItems?: { sceneItemId: number; sourceName?: string }[] };
+              items = next?.sceneItems ?? [];
+              item = items.find((i) => i.sourceName === inputName);
+            }
+            if (item != null) {
+              await win.obsRequest!("SetSceneItemEnabled", { sceneName, sceneItemId: item.sceneItemId, sceneItemEnabled: true });
+            }
+            await win.obsRequest!("SetInputSettings", { inputName, inputSettings: { url } });
+          };
+
           const sendUrlsToOBS = () => {
             if (!win.obsRequest) return false;
             try {
-              if (marqueeEnabled) {
-                win.obsRequest("SetInputSettings", { inputName: "Marquee", inputSettings: { url: marqueeUrlForObs } })
-                  .then(() => setTimeout(() => win.reloadBrowserSource?.("Marquee")?.catch(() => {}), 300))
-                  .catch(() => {});
-              }
               (async () => {
                 try {
                   const sceneData = (await win.obsRequest!("GetCurrentProgramScene", {})) as { currentProgramSceneName?: string };
                   const sceneName = sceneData?.currentProgramSceneName;
                   if (!sceneName) return;
                   let listData = (await win.obsRequest!("GetSceneItemList", { sceneName })) as { sceneItems?: { sceneItemId: number; sourceName?: string }[] };
-                  let matchupItem = listData?.sceneItems?.find((i) => i.sourceName === "Matchup Card");
-                  if (matchupItem == null) {
-                    try {
-                      await win.obsRequest!("CreateInput", {
-                        sceneName,
-                        inputName: "Matchup Card",
-                        inputKind: "browser_source",
-                        inputSettings: { url: matchupCardUrlForObs, width: 1920, height: 1080 },
-                      });
-                    } catch (createErr) {
-                      const errMsg = String(createErr ?? "");
-                      if (errMsg.includes("already") || errMsg.includes("exists")) {
-                        await win.obsRequest!("CreateSceneItem", { sceneName, sourceName: "Matchup Card" }).catch(() => {});
-                      }
-                    }
+                  if (marqueeEnabled) {
+                    await ensureBrowserAndSetUrl(sceneName, listData, "Marquee", marqueeUrlForObs);
                     listData = (await win.obsRequest!("GetSceneItemList", { sceneName })) as { sceneItems?: { sceneItemId: number; sourceName?: string }[] };
-                    matchupItem = listData?.sceneItems?.find((i) => i.sourceName === "Matchup Card");
                   }
-                  if (matchupItem != null) {
-                    await win.obsRequest!("SetSceneItemEnabled", { sceneName, sceneItemId: matchupItem.sceneItemId, sceneItemEnabled: true });
-                  }
-                  await win.obsRequest!("SetInputSettings", { inputName: "Matchup Card", inputSettings: { url: matchupCardUrlForObs } });
-                  await new Promise((r) => setTimeout(r, 100));
-                  await win.obsRequest!("SetInputSettings", { inputName: "Matchup Card", inputSettings: { url: matchupCardUrlForObs } });
-                  setTimeout(() => win.reloadBrowserSource?.("Matchup Card")?.catch(() => {}), 300);
+                  await ensureBrowserAndSetUrl(sceneName, listData, "Matchup Card", matchupCardUrlForObs);
                 } catch (_) {}
               })();
               return true;
@@ -489,8 +506,6 @@ export default function EventAndMatchupEditor() {
           if (marqueeItem != null) {
             await obsRequest("SetInputSettings", { inputName: "Marquee", inputSettings: { url: marqueeUrl } });
             await obsRequest("SetSceneItemEnabled", { sceneName, sceneItemId: marqueeItem.sceneItemId, sceneItemEnabled: true });
-            const reload = (win as unknown as { reloadBrowserSource?: (name: string) => Promise<void> }).reloadBrowserSource;
-            if (typeof reload === "function") await reload("Marquee").catch(() => {});
           } else {
             try {
               await obsRequest("CreateInput", {
@@ -504,8 +519,6 @@ export default function EventAndMatchupEditor() {
               if (errMsg.includes("already") || errMsg.includes("exists")) {
                 await obsRequest("CreateSceneItem", { sceneName, sourceName: "Marquee" }).catch(() => {});
                 await obsRequest("SetInputSettings", { inputName: "Marquee", inputSettings: { url: marqueeUrl } });
-                const reload = (win as unknown as { reloadBrowserSource?: (name: string) => Promise<void> }).reloadBrowserSource;
-                if (typeof reload === "function") await reload("Marquee").catch(() => {});
               }
             }
           }
@@ -529,20 +542,161 @@ export default function EventAndMatchupEditor() {
     }
   }, [marqueeEnabled, marqueePath]);
 
-  return (
+  const standingsBlock = (
+    <div className="rounded-lg border border-slate-600/60 bg-slate-800/40 p-4">
+      <button type="button" onClick={() => setStandingsExpanded((p) => !p)} className="flex items-center gap-2 w-full text-left text-sm font-medium text-slate-300 hover:text-white">
+        {standingsExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+        Final Standings
+      </button>
+      {standingsExpanded && (
+        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {Array.from({ length: playerCount }, (_, i) => playerCount - i).map((position) => {
+            const availablePlayers = getAvailablePlayersForPosition(position);
+            const selectedPlayerIndex = standings[position];
+            return (
+              <div key={position} className="flex items-center gap-2">
+                <span className="text-slate-500 text-sm w-8 shrink-0">{position}{positionSuffix(position)}</span>
+                <select value={selectedPlayerIndex ?? -1} onChange={(e) => handleStandingChange(position, parseInt(e.target.value, 10))} className="flex-1 min-w-0 px-3 py-1.5 text-sm bg-slate-900/80 border border-slate-600 rounded text-white">
+                  <option value={-1}>— Select —</option>
+                  {availablePlayers.map(({ index, name }) => (
+                    <option key={index} value={index}>{name}</option>
+                  ))}
+                </select>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
+  const includeStandingsInSection = !renderSections;
+  const includeMarqueeInSection = !renderMarqueeRow;
+  const includePlayerListInSection = !renderSections;
+  const includePathsInSection = !renderSections;
+  const includeFontSizesInSection = !renderSections;
+
+  const pathsBlock = (
+    <div className="rounded-lg border border-slate-600/60 bg-slate-800/40 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setPathsExpanded((p) => !p)}
+        className="flex w-full items-center gap-2 p-4 text-left text-sm font-semibold text-slate-300 hover:bg-slate-700/30 transition-colors"
+      >
+        {pathsExpanded ? <ChevronDown className="w-4 h-4 shrink-0" /> : <ChevronRight className="w-4 h-4 shrink-0" />}
+        Paths
+      </button>
+      {pathsExpanded && (
+        <div className="space-y-3 px-4 pb-4">
+          <div className="flex gap-2 items-center">
+            <label className="text-slate-400 text-sm shrink-0 w-24">Marquee</label>
+            <input type="text" readOnly value={marqueePath} placeholder="After update" className="flex-1 min-w-0 px-3 py-1.5 text-xs bg-slate-900/80 border border-slate-600 rounded text-slate-300" />
+            <button type="button" onClick={() => copyPath(marqueePath)} disabled={!marqueePath} className="shrink-0 px-3 py-1.5 text-xs bg-slate-600 hover:bg-slate-500 text-white rounded disabled:opacity-50">Copy</button>
+          </div>
+          <div className="flex gap-2 items-center">
+            <label className="text-slate-400 text-sm shrink-0 w-24">Matchup</label>
+            <input type="text" readOnly value={matchupCardPath} placeholder="After update" className="flex-1 min-w-0 px-3 py-1.5 text-xs bg-slate-900/80 border border-slate-600 rounded text-slate-300" />
+            <button type="button" onClick={() => copyPath(matchupCardPath)} disabled={!matchupCardPath} className="shrink-0 px-3 py-1.5 text-xs bg-slate-600 hover:bg-slate-500 text-white rounded disabled:opacity-50">Copy</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const fontSizesBlock = (
+    <div className="rounded-lg border border-slate-600/60 bg-slate-800/40 p-4">
+      <button type="button" onClick={() => setFontSizesExpanded((p) => !p)} className="flex items-center gap-2 w-full text-left text-sm font-medium text-slate-300 hover:text-white">
+        {fontSizesExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+        Font Sizes
+      </button>
+      {fontSizesExpanded && (
+        <div className="mt-3 grid gap-2">
+          <div className="flex items-center gap-2">
+            <label className="text-slate-400 text-sm w-36">Event name</label>
+            <input type="number" min={8} max={48} value={eventNameFontSize} onChange={(e) => setEventNameFontSize(Math.max(8, Math.min(48, parseInt(e.target.value, 10) || DEFAULT_EVENT_NAME_FONT_SIZE)))} className="w-16 px-2 py-1 text-xs bg-slate-900/80 border border-slate-600 rounded text-white" />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-slate-400 text-sm w-36">Sub text</label>
+            <input type="number" min={8} max={48} value={subTextFontSize} onChange={(e) => setSubTextFontSize(Math.max(8, Math.min(48, parseInt(e.target.value, 10) || DEFAULT_SUB_TEXT_FONT_SIZE)))} className="w-16 px-2 py-1 text-xs bg-slate-900/80 border border-slate-600 rounded text-white" />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-slate-400 text-sm w-36">Player name</label>
+            <input type="number" min={8} max={48} value={playerNameFontSize} onChange={(e) => setPlayerNameFontSize(Math.max(8, Math.min(48, parseInt(e.target.value, 10) || DEFAULT_PLAYER_NAME_FONT_SIZE)))} className="w-16 px-2 py-1 text-xs bg-slate-900/80 border border-slate-600 rounded text-white" />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-slate-400 text-sm w-36">Marquee</label>
+            <input type="number" min={8} max={48} value={marqueeFontSize} onChange={(e) => setMarqueeFontSize(Math.max(8, Math.min(48, parseInt(e.target.value, 10) || DEFAULT_MARQUEE_FONT_SIZE)))} className="w-16 px-2 py-1 text-xs bg-slate-900/80 border border-slate-600 rounded text-white" />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const playerListBlock = (
+    <div className="rounded-lg border border-slate-600/60 bg-slate-800/40 p-4">
+      <button type="button" onClick={() => setPlayerListExpanded((p) => !p)} className="flex items-center gap-2 w-full text-left text-sm font-medium text-slate-300 hover:text-white">
+        {playerListExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+        Player List {playerCount > 0 && `(${playerCount})`}
+      </button>
+      {playerListExpanded && (
+        <div className="mt-3 space-y-3">
+          <div className="flex items-center gap-2">
+            <label className="text-slate-400 text-sm">Number of players</label>
+            <input type="number" min={0} max={128} value={playerCount} onChange={(e) => setPlayerCount(Math.max(0, parseInt(e.target.value, 10) || 0))} className="w-14 px-2 py-1 text-xs bg-slate-900/80 border border-slate-600 rounded text-white" />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {playerNames.map((name, index) => (
+              <div key={index} className="flex items-center gap-2">
+                <span className="text-slate-500 text-sm w-6 shrink-0">{index + 1}.</span>
+                <input type="text" value={name} onChange={(e) => handlePlayerNameChange(index, e.target.value)} placeholder={`Player ${index + 1}`} className="flex-1 min-w-0 px-3 py-1.5 text-sm bg-slate-900/80 border border-slate-600 rounded text-white placeholder-slate-500" />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const marqueeBlock = (
+    <div className="rounded-lg border border-slate-600/60 bg-slate-800/40 p-4">
+      <div className="flex items-stretch gap-3 w-full min-w-0">
+        <button type="button" onClick={() => setMarqueeExpanded((p) => !p)} className="flex shrink-0 items-center gap-2 text-left text-sm font-medium text-slate-300 hover:text-white">
+          {marqueeExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+          Marquee
+        </button>
+        <div className="flex-1 min-w-0 rounded-lg border border-slate-600/60 bg-slate-900/40 overflow-hidden">
+          <MarqueeBanner />
+        </div>
+      </div>
+      {marqueeExpanded && (
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={marqueeEnabled} onChange={(e) => setMarqueeEnabled(e.target.checked)} className="rounded border-slate-600 bg-slate-900/80 text-slate-500" />
+            <span className="text-slate-300 text-sm">Display marquee banner</span>
+          </label>
+          <div className="flex items-center gap-2">
+            <label className="text-slate-400 text-sm">Speed</label>
+            <input type="number" min={1} max={100} value={marqueeSpeed} onChange={(e) => setMarqueeSpeed(Math.max(1, Math.min(100, parseInt(e.target.value, 10) || 50)))} className="w-14 px-2 py-1 text-xs bg-slate-900/80 border border-slate-600 rounded text-white" />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const sectionEl = (
     <section className="rounded-xl border border-slate-700/60 bg-slate-800/40 shadow-xl overflow-visible">
       {/* Header: Event & Matchup (collapsible) + event input */}
       <div className="flex flex-wrap items-center gap-3 border-b border-slate-700/60 px-5 py-3">
         <button
           type="button"
           onClick={() => setEventMatchupSectionExpanded((p) => !p)}
-          className="flex items-center gap-2 text-left text-lg font-semibold text-white hover:opacity-90 transition-opacity"
+          className="flex shrink-0 items-center gap-2 text-left text-lg font-semibold text-white hover:opacity-90 transition-opacity"
         >
           {eventMatchupSectionExpanded ? <ChevronDown className="w-5 h-5 shrink-0" /> : <ChevronRight className="w-5 h-5 shrink-0" />}
           Event & Matchup
         </button>
-        <div className="ml-auto flex items-center gap-2 min-w-0" onClick={(e) => e.stopPropagation()}>
-          <div className="relative min-w-0 w-64 max-w-[min(100%,20rem)]">
+        <div className="flex flex-1 min-w-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
+          <div className="relative flex-1 min-w-0">
             <input
               type="text"
               value={eventName}
@@ -550,7 +704,7 @@ export default function EventAndMatchupEditor() {
               onFocus={() => setDropdownOpen(true)}
               onBlur={() => setTimeout(() => setDropdownOpen(false), 150)}
               placeholder="Event name or select saved"
-              className="w-full min-w-0 px-4 py-2 pr-8 text-sm bg-slate-900/80 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+              className="w-full min-w-0 px-4 py-2 pr-8 text-sm text-left bg-slate-900/80 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
             />
             <button type="button" onClick={() => setDropdownOpen((o) => !o)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-white" tabIndex={-1}>
               <ChevronDown className="w-4 h-4" />
@@ -673,167 +827,20 @@ export default function EventAndMatchupEditor() {
         )}
       </div>
 
-      {/* Paths */}
-      <div className="rounded-lg border border-slate-600/60 bg-slate-800/40 overflow-hidden">
-        <button
-          type="button"
-          onClick={() => setPathsExpanded((p) => !p)}
-          className="flex w-full items-center gap-2 p-4 text-left text-sm font-semibold text-slate-300 hover:bg-slate-700/30 transition-colors"
-        >
-          {pathsExpanded ? <ChevronDown className="w-4 h-4 shrink-0" /> : <ChevronRight className="w-4 h-4 shrink-0" />}
-          Paths
-        </button>
-        {pathsExpanded && (
-          <div className="space-y-3 px-4 pb-4">
-            <div className="flex gap-2 items-center">
-              <label className="text-slate-400 text-sm shrink-0 w-24">Marquee</label>
-              <input type="text" readOnly value={marqueePath} placeholder="After update" className="flex-1 min-w-0 px-3 py-1.5 text-xs bg-slate-900/80 border border-slate-600 rounded text-slate-300" />
-              <button type="button" onClick={() => copyPath(marqueePath)} disabled={!marqueePath} className="shrink-0 px-3 py-1.5 text-xs bg-slate-600 hover:bg-slate-500 text-white rounded disabled:opacity-50">Copy</button>
-            </div>
-            <div className="flex gap-2 items-center">
-              <label className="text-slate-400 text-sm shrink-0 w-24">Matchup</label>
-              <input type="text" readOnly value={matchupCardPath} placeholder="After update" className="flex-1 min-w-0 px-3 py-1.5 text-xs bg-slate-900/80 border border-slate-600 rounded text-slate-300" />
-              <button type="button" onClick={() => copyPath(matchupCardPath)} disabled={!matchupCardPath} className="shrink-0 px-3 py-1.5 text-xs bg-slate-600 hover:bg-slate-500 text-white rounded disabled:opacity-50">Copy</button>
-            </div>
-            {lastMarqueeUploadAt && (
-              <p className="text-slate-500 text-xs">Last upload: {new Date(lastMarqueeUploadAt).toLocaleString()}</p>
-            )}
-            <button
-              type="button"
-              onClick={() => {
-                setRefreshMarqueeError(null);
-                const reload = (window as unknown as { reloadBrowserSource?: (name: string) => Promise<void> }).reloadBrowserSource;
-                if (typeof reload === "function") {
-                  reload("Marquee").catch((err: Error) => setRefreshMarqueeError(err?.message ?? String(err)));
-                } else {
-                  setRefreshMarqueeError("OBS connection not loaded. Refresh the page.");
-                }
-              }}
-              className="px-3 py-2 text-sm font-medium rounded-lg bg-slate-700/80 text-slate-200 hover:bg-slate-600/80"
-            >
-              Refresh Marquee in OBS
-            </button>
-            {refreshMarqueeError && (
-              <div className="rounded-lg border border-red-500/60 bg-red-950/40 px-3 py-2 text-sm text-red-200 flex items-center justify-between gap-2">
-                <span className="min-w-0">{refreshMarqueeError}</span>
-                <button type="button" onClick={() => setRefreshMarqueeError(null)} className="shrink-0 px-2 py-0.5 hover:bg-red-900/50 rounded">Dismiss</button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      {hasEventLoaded && includePathsInSection && pathsBlock}
 
         </>
       )}
 
       {hasEventLoaded && (
         <>
-          {/* Font sizes */}
-          <div className="rounded-lg border border-slate-600/60 bg-slate-800/40 p-4">
-            <button type="button" onClick={() => setFontSizesExpanded((p) => !p)} className="flex items-center gap-2 w-full text-left text-sm font-medium text-slate-300 hover:text-white">
-              {fontSizesExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-              Font Sizes
-            </button>
-            {fontSizesExpanded && (
-              <div className="mt-3 grid gap-2">
-                <div className="flex items-center gap-2">
-                  <label className="text-slate-400 text-sm w-36">Event name</label>
-                  <input type="number" min={8} max={48} value={eventNameFontSize} onChange={(e) => setEventNameFontSize(Math.max(8, Math.min(48, parseInt(e.target.value, 10) || DEFAULT_EVENT_NAME_FONT_SIZE)))} className="w-16 px-2 py-1 text-xs bg-slate-900/80 border border-slate-600 rounded text-white" />
-                </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-slate-400 text-sm w-36">Sub text</label>
-                  <input type="number" min={8} max={48} value={subTextFontSize} onChange={(e) => setSubTextFontSize(Math.max(8, Math.min(48, parseInt(e.target.value, 10) || DEFAULT_SUB_TEXT_FONT_SIZE)))} className="w-16 px-2 py-1 text-xs bg-slate-900/80 border border-slate-600 rounded text-white" />
-                </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-slate-400 text-sm w-36">Player name</label>
-                  <input type="number" min={8} max={48} value={playerNameFontSize} onChange={(e) => setPlayerNameFontSize(Math.max(8, Math.min(48, parseInt(e.target.value, 10) || DEFAULT_PLAYER_NAME_FONT_SIZE)))} className="w-16 px-2 py-1 text-xs bg-slate-900/80 border border-slate-600 rounded text-white" />
-                </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-slate-400 text-sm w-36">Marquee</label>
-                  <input type="number" min={8} max={48} value={marqueeFontSize} onChange={(e) => setMarqueeFontSize(Math.max(8, Math.min(48, parseInt(e.target.value, 10) || DEFAULT_MARQUEE_FONT_SIZE)))} className="w-16 px-2 py-1 text-xs bg-slate-900/80 border border-slate-600 rounded text-white" />
-                </div>
-              </div>
-            )}
-          </div>
+          {includeFontSizesInSection && fontSizesBlock}
 
-          {/* Marquee */}
-          <div className="rounded-lg border border-slate-600/60 bg-slate-800/40 p-4">
-            <button type="button" onClick={() => setMarqueeExpanded((p) => !p)} className="flex items-center gap-2 w-full text-left text-sm font-medium text-slate-300 hover:text-white">
-              {marqueeExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-              Marquee
-            </button>
-            {marqueeExpanded && (
-              <>
-                <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" checked={marqueeEnabled} onChange={(e) => setMarqueeEnabled(e.target.checked)} className="rounded border-slate-600 bg-slate-900/80 text-slate-500" />
-                    <span className="text-slate-300 text-sm">Display marquee banner</span>
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <label className="text-slate-400 text-sm">Speed</label>
-                    <input type="number" min={1} max={100} value={marqueeSpeed} onChange={(e) => setMarqueeSpeed(Math.max(1, Math.min(100, parseInt(e.target.value, 10) || 50)))} className="w-14 px-2 py-1 text-xs bg-slate-900/80 border border-slate-600 rounded text-white" />
-                  </div>
-                </div>
-                <div className="mt-4 rounded-lg border border-slate-600/60 bg-slate-900/40 p-3 min-h-0 overflow-visible">
-                  <h4 className="text-xs font-semibold text-slate-400 mb-2">Marquee Preview</h4>
-                  <div className="min-h-0 overflow-visible">
-                    <MarqueeBanner />
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
+          {includeMarqueeInSection && marqueeBlock}
 
-          {/* Player list */}
-          <div className="rounded-lg border border-slate-600/60 bg-slate-800/40 p-4">
-            <button type="button" onClick={() => setPlayerListExpanded((p) => !p)} className="flex items-center gap-2 w-full text-left text-sm font-medium text-slate-300 hover:text-white">
-              {playerListExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-              Player List {playerCount > 0 && `(${playerCount})`}
-            </button>
-            {playerListExpanded && (
-              <div className="mt-3 space-y-3">
-                <div className="flex items-center gap-2">
-                  <label className="text-slate-400 text-sm">Number of players</label>
-                  <input type="number" min={0} max={128} value={playerCount} onChange={(e) => setPlayerCount(Math.max(0, parseInt(e.target.value, 10) || 0))} className="w-14 px-2 py-1 text-xs bg-slate-900/80 border border-slate-600 rounded text-white" />
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {playerNames.map((name, index) => (
-                    <div key={index} className="flex items-center gap-2">
-                      <span className="text-slate-500 text-sm w-6 shrink-0">{index + 1}.</span>
-                      <input type="text" value={name} onChange={(e) => handlePlayerNameChange(index, e.target.value)} placeholder={`Player ${index + 1}`} className="flex-1 min-w-0 px-3 py-1.5 text-sm bg-slate-900/80 border border-slate-600 rounded text-white placeholder-slate-500" />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+          {hasEventLoaded && includePlayerListInSection && playerListBlock}
 
-          {/* Standings */}
-          <div className="rounded-lg border border-slate-600/60 bg-slate-800/40 p-4">
-            <button type="button" onClick={() => setStandingsExpanded((p) => !p)} className="flex items-center gap-2 w-full text-left text-sm font-medium text-slate-300 hover:text-white">
-              {standingsExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-              Final Standings
-            </button>
-            {standingsExpanded && (
-              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {Array.from({ length: playerCount }, (_, i) => i + 1).map((position) => {
-                  const availablePlayers = getAvailablePlayersForPosition(position);
-                  const selectedPlayerIndex = standings[position];
-                  return (
-                    <div key={position} className="flex items-center gap-2">
-                      <span className="text-slate-500 text-sm w-8 shrink-0">{position}{positionSuffix(position)}.</span>
-                      <select value={selectedPlayerIndex ?? -1} onChange={(e) => handleStandingChange(position, parseInt(e.target.value, 10))} className="flex-1 min-w-0 px-3 py-1.5 text-sm bg-slate-900/80 border border-slate-600 rounded text-white">
-                        <option value={-1}>— Select —</option>
-                        {availablePlayers.map(({ index, name }) => (
-                          <option key={index} value={index}>{name}</option>
-                        ))}
-                      </select>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+          {hasEventLoaded && includeStandingsInSection && standingsBlock}
 
         </>
       )}
@@ -858,4 +865,20 @@ export default function EventAndMatchupEditor() {
       )}
     </section>
   );
+
+  if (renderSections) {
+    return (
+      <>
+        {renderMarqueeRow?.(marqueeBlock) ?? null}
+        {renderSections({
+          eventMatchup: sectionEl,
+          standings: standingsBlock,
+          playerList: playerListBlock,
+          paths: pathsBlock,
+          fontSizes: fontSizesBlock,
+        })}
+      </>
+    );
+  }
+  return sectionEl;
 }

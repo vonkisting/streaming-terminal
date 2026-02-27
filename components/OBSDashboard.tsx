@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import Script from "next/script";
 import Link from "next/link";
 import {
@@ -13,14 +13,13 @@ import {
   Radio,
   Circle,
   Square,
-  RefreshCw,
   ExternalLink,
   Settings2,
-  ListOrdered,
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
 import EventAndMatchupEditor from "./EventAndMatchupEditor";
+import ResizablePanel from "./ResizablePanel";
 
 const DEFAULT_WS_URL = "ws://localhost:4455";
 
@@ -61,6 +60,83 @@ interface RecordStatusResponse {
   outputDuration?: number;
 }
 
+type CardLayout = { x: number; y: number; w: number; h: number };
+type LayoutState = Record<string, CardLayout>;
+
+const OBS_DASHBOARD_LAYOUT_KEY = "obs-dashboard-layout";
+
+const DEFAULT_LAYOUT: LayoutState = {
+  "connect-prompt": { x: 20, y: 20, w: 260, h: 200 },
+  scenes: { x: 300, y: 20, w: 260, h: 280 },
+  stream: { x: 580, y: 20, w: 260, h: 220 },
+  recording: { x: 580, y: 260, w: 260, h: 220 },
+};
+
+function loadLayout(): LayoutState {
+  if (typeof window === "undefined") return { ...DEFAULT_LAYOUT };
+  try {
+    const raw = localStorage.getItem(OBS_DASHBOARD_LAYOUT_KEY);
+    if (!raw) return { ...DEFAULT_LAYOUT };
+    const parsed = JSON.parse(raw) as Record<string, CardLayout>;
+    delete parsed.connection;
+    delete parsed["event-matchup"];
+    return { ...DEFAULT_LAYOUT, ...parsed };
+  } catch {
+    return { ...DEFAULT_LAYOUT };
+  }
+}
+
+function rectsOverlap(a: CardLayout, b: CardLayout): boolean {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function resolveOverlaps(layout: LayoutState, changedId: string): LayoutState {
+  const ids = Object.keys(layout);
+  let result = { ...layout };
+  const PAD = 8;
+  const maxPasses = 10;
+  for (let pass = 0; pass < maxPasses; pass++) {
+    let moved = false;
+    for (const id of ids) {
+      if (id === changedId) continue;
+      const cur = result[id];
+      if (!cur) continue;
+      for (const otherId of ids) {
+        if (otherId === id) continue;
+        const other = result[otherId];
+        if (!other || !rectsOverlap(cur, other)) continue;
+        const pushRight = other.x + other.w - cur.x + PAD;
+        const pushLeft = cur.x + cur.w - other.x + PAD;
+        const pushDown = other.y + other.h - cur.y + PAD;
+        const pushUp = cur.y + cur.h - other.y + PAD;
+        const candidates: { dx: number; dy: number }[] = [];
+        if (pushRight > PAD && cur.x < other.x + other.w) candidates.push({ dx: pushRight, dy: 0 });
+        if (pushLeft > PAD && cur.x + cur.w > other.x) candidates.push({ dx: -pushLeft, dy: 0 });
+        if (pushDown > PAD && cur.y < other.y + other.h) candidates.push({ dx: 0, dy: pushDown });
+        if (pushUp > PAD && cur.y + cur.h > other.y) candidates.push({ dx: 0, dy: -pushUp });
+        const valid = candidates.filter((c) => Math.abs(c.dx) < 3000 && Math.abs(c.dy) < 3000);
+        const best = valid.length
+          ? valid.reduce((acc, c) => (Math.abs(acc.dx) + Math.abs(acc.dy) <= Math.abs(c.dx) + Math.abs(c.dy) ? acc : c))
+          : null;
+        if (best) {
+          result = {
+            ...result,
+            [id]: {
+              ...cur,
+              x: Math.max(0, cur.x + best.dx),
+              y: Math.max(0, cur.y + best.dy),
+            },
+          };
+          moved = true;
+          break;
+        }
+      }
+    }
+    if (!moved) break;
+  }
+  return result;
+}
+
 export default function OBSDashboard() {
   const [scriptReady, setScriptReady] = useState(false);
   const [url, setUrl] = useState(DEFAULT_WS_URL);
@@ -76,6 +152,24 @@ export default function OBSDashboard() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [connectionExpanded, setConnectionExpanded] = useState(true);
+  const [layout, setLayout] = useState<LayoutState>(() => loadLayout());
+  const [dragState, setDragState] = useState<{ id: string; startX: number; startY: number; startLeft: number; startTop: number } | null>(null);
+  const [resizeState, setResizeState] = useState<{ id: string; startX: number; startY: number; startW: number; startH: number } | null>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
+
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const rect = entries[0]?.target.getBoundingClientRect();
+      if (rect) setContainerSize({ w: Math.floor(rect.width), h: Math.floor(rect.height) });
+    });
+    ro.observe(el);
+    const rect = el.getBoundingClientRect();
+    setContainerSize({ w: Math.floor(rect.width), h: Math.floor(rect.height) });
+    return () => ro.disconnect();
+  }, []);
 
   const envUrl = typeof process !== "undefined" ? process.env.NEXT_PUBLIC_OBS_WS_URL : undefined;
   const envPassword = typeof process !== "undefined" ? process.env.NEXT_PUBLIC_OBS_WS_PASSWORD : undefined;
@@ -83,6 +177,72 @@ export default function OBSDashboard() {
   useEffect(() => {
     if (envUrl) setUrl(envUrl);
   }, [envUrl]);
+
+  useEffect(() => {
+    try {
+      const toSave = { ...layout };
+      delete toSave.connection;
+      delete toSave["event-matchup"];
+      localStorage.setItem(OBS_DASHBOARD_LAYOUT_KEY, JSON.stringify(toSave));
+    } catch {
+      // ignore
+    }
+  }, [layout]);
+
+  useEffect(() => {
+    if (!dragState && !resizeState) return;
+    const onMouseMove = (e: MouseEvent) => {
+      if (dragState) {
+        const dx = e.clientX - dragState.startX;
+        const dy = e.clientY - dragState.startY;
+        setLayout((prev) => ({
+          ...prev,
+          [dragState.id]: {
+            ...prev[dragState.id],
+            x: Math.max(0, dragState.startLeft + dx),
+            y: Math.max(0, dragState.startTop + dy),
+          },
+        }));
+      } else if (resizeState) {
+        const dw = e.clientX - resizeState.startX;
+        const dh = e.clientY - resizeState.startY;
+        const rect = mainRef.current?.getBoundingClientRect();
+        const maxW = rect ? Math.max(400, Math.floor(rect.width) - 32) : (typeof window !== "undefined" ? Math.max(400, window.innerWidth - 32) : 4000);
+        const maxH = rect ? Math.max(200, Math.floor(rect.height) - 32) : (typeof window !== "undefined" ? Math.max(200, window.innerHeight - 100) : 2000);
+        setLayout((prev) => {
+          const cur = prev[resizeState.id] ?? DEFAULT_LAYOUT[resizeState.id];
+          const minW = 200;
+          const minH = 120;
+          return {
+            ...prev,
+            [resizeState.id]: {
+              ...cur,
+              w: Math.max(minW, Math.min(maxW, resizeState.startW + dw)),
+              h: Math.max(minH, Math.min(maxH, resizeState.startH + dh)),
+            },
+          };
+        });
+      }
+    };
+    const onMouseUp = () => {
+      const changedId = dragState?.id ?? resizeState?.id ?? null;
+      setDragState(null);
+      setResizeState(null);
+      if (changedId) {
+        setLayout((prev) => resolveOverlaps(prev, changedId));
+      }
+    };
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    document.body.style.cursor = dragState ? "grabbing" : "nwse-resize";
+    document.body.style.userSelect = "none";
+    return () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [dragState, resizeState]);
 
   useEffect(() => {
     if (scriptReady) return;
@@ -259,6 +419,47 @@ export default function OBSDashboard() {
 
   const isConnected = status === "connected" && window.isOBSConnected?.();
 
+  function DashboardCard({ id, children, glow }: { id: keyof LayoutState; children: ReactNode; glow?: "green" | "red" }) {
+    const lay = layout[id] ?? DEFAULT_LAYOUT[id];
+    if (!lay) return <>{children}</>;
+    const maxW = containerSize.w > 0 ? containerSize.w : lay.w;
+    const w = Math.min(lay.w, maxW);
+    const glowClass = glow === "green" ? "obs-card-glow-green" : glow === "red" ? "obs-card-glow-red" : "";
+    return (
+      <div
+        className={`flex flex-col rounded-xl border bg-slate-800/40 shadow-xl overflow-hidden ${glow ? "border-2" : "border border-slate-700/60"} ${glow === "green" ? "border-emerald-500/70" : glow === "red" ? "border-red-500/70" : ""} ${glowClass}`}
+        style={{ position: "absolute", left: lay.x, top: lay.y, width: w, height: lay.h, minWidth: 200, minHeight: 120 }}
+      >
+        <div
+          role="button"
+          tabIndex={0}
+          onMouseDown={(e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            setDragState({ id, startX: e.clientX, startY: e.clientY, startLeft: lay.x, startTop: lay.y });
+          }}
+          onKeyDown={() => {}}
+          className="h-2 w-full shrink-0 cursor-grab active:cursor-grabbing bg-slate-700/40 hover:bg-slate-600/50 border-b border-slate-600/60"
+          title="Drag to move"
+        />
+        <div className="flex-1 min-h-0 overflow-auto">{children}</div>
+        <div
+          role="button"
+          tabIndex={0}
+          onMouseDown={(e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+            setResizeState({ id, startX: e.clientX, startY: e.clientY, startW: lay.w, startH: lay.h });
+          }}
+          className="absolute right-0 bottom-0 w-4 h-4 cursor-nwse-resize border-t border-l border-slate-500/50 rounded-tl"
+          title="Resize"
+          style={{ background: "linear-gradient(135deg, transparent 50%, rgba(100,116,139,0.4) 50%)" }}
+        />
+      </div>
+    );
+  }
+
   return (
     <>
       <Script
@@ -268,7 +469,7 @@ export default function OBSDashboard() {
       />
       <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-black text-slate-100">
         <header className="sticky top-0 z-10 border-b border-slate-700/50 bg-slate-900/80 backdrop-blur-sm">
-          <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
+          <div className="mx-auto flex h-12 max-w-6xl items-center justify-start px-4 sm:px-6">
             <div className="flex items-center gap-3">
               <Link
                 href="/stream"
@@ -280,28 +481,20 @@ export default function OBSDashboard() {
               </Link>
               <h1 className="text-xl font-semibold tracking-tight text-white">OBS Dashboard</h1>
             </div>
-            {isConnected && (
-              <button
-                type="button"
-                onClick={refresh}
-                className="flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-800/80 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700/80"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Refresh
-              </button>
-            )}
           </div>
         </header>
 
-        <main className="mx-auto max-w-6xl space-y-8 px-4 py-8 sm:px-6">
-          {/* Connection section */}
-          <section className="rounded-xl border border-slate-700/60 bg-slate-800/40 shadow-xl">
+        <main ref={mainRef} className="flex flex-col px-4 pt-4 pb-8 min-h-[calc(100vh-3rem)] w-full">
+          {/* Connection: full-width row, not draggable */}
+          <section
+            className={`mb-4 w-full shrink-0 rounded-xl border bg-slate-800/40 shadow-xl overflow-hidden ${isConnected ? "border-2 border-emerald-500/70 obs-card-glow-green" : "border-2 border-red-500/70 obs-card-glow-red"}`}
+          >
             <div
               role="button"
               tabIndex={0}
               onClick={() => setConnectionExpanded((e) => !e)}
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setConnectionExpanded((c) => !c); } }}
-              className="flex w-full flex-wrap items-center justify-between gap-4 border-b border-slate-700/60 px-5 py-4 text-left hover:bg-slate-700/20 transition-colors rounded-t-xl cursor-pointer"
+              className="flex w-full flex-wrap items-center justify-between gap-4 border-b border-slate-700/60 px-5 py-4 text-left hover:bg-slate-700/20 transition-colors cursor-pointer"
             >
               <h2 className="flex items-center gap-2 text-lg font-semibold text-white">
                 {connectionExpanded ? (
@@ -373,189 +566,164 @@ export default function OBSDashboard() {
               </div>
             )}
 
-            <div className="grid gap-6 p-5 sm:grid-cols-2">
-              <div className="space-y-4">
-                <label className="block text-sm font-medium text-slate-300">WebSocket URL</label>
-                <input
-                  type="text"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  placeholder="ws://localhost:4455"
-                  disabled={isConnected}
-                  className="w-full rounded-lg border border-slate-600 bg-slate-900/80 px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-70"
-                />
-                {!isConnected && (url || envUrl) && (
-                  <p className="text-xs text-slate-500">
-                    Will connect to: {(url.trim() || envUrl || DEFAULT_WS_URL).trim()}
-                  </p>
-                )}
-                <label className="block text-sm font-medium text-slate-300">Password (optional)</label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Leave empty if not set in OBS"
-                  disabled={isConnected}
-                  className="w-full rounded-lg border border-slate-600 bg-slate-900/80 px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-70"
-                />
-              </div>
-              <div className="rounded-lg border border-slate-600/60 bg-slate-900/40 p-4">
-                <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-200">
-                  <ListOrdered className="h-4 w-4 text-slate-400" />
-                  How to connect
-                </h3>
-                <ol className="list-inside list-decimal space-y-2 text-sm text-slate-400">
-                  <li>Open OBS Studio on the machine where it runs.</li>
-                  <li>In OBS, go to <strong className="text-slate-300">Tools → WebSocket Server Settings</strong>.</li>
-                  <li>Enable <strong className="text-slate-300">Enable WebSocket server</strong>.</li>
-                  <li>Leave password blank if you don’t use one; otherwise enter it above.</li>
-                  <li>Use <strong className="text-slate-300">ws://localhost:4455</strong> if OBS is on this PC, or <strong className="text-slate-300">ws://&lt;OBS PC IP&gt;:4455</strong> (e.g. ws://192.168.1.140:4455) if OBS is on another computer.</li>
-                  <li><strong className="text-slate-300">OBS on another PC:</strong> On the OBS machine, allow port 4455 through Windows Firewall (or turn off firewall for testing). Ensure both PCs are on the same network.</li>
-                  <li>Click <strong className="text-emerald-400">Connect</strong>.</li>
-                </ol>
-              </div>
+            <div className="grid grid-cols-[minmax(140px,max-content)_1fr] gap-x-4 gap-y-4 p-5 items-center">
+              <label className="text-sm font-medium text-slate-300">WebSocket URL</label>
+              <input
+                type="text"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="ws://localhost:4455"
+                disabled={isConnected}
+                className="w-full min-w-0 rounded-lg border border-slate-600 bg-slate-900/80 px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-70"
+              />
+              <label className="text-sm font-medium text-slate-300">Password (optional)</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Leave empty if not set in OBS"
+                disabled={isConnected}
+                className="w-full min-w-0 max-w-[220px] rounded-lg border border-slate-600 bg-slate-900/80 px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-70"
+              />
             </div>
               </>
             )}
           </section>
 
-          {/* Event & Matchup – inputs and preview (card + header live in EventAndMatchupEditor) */}
-          <EventAndMatchupEditor />
-
-          {!isConnected && (
-            <div className="rounded-xl border border-slate-700/60 bg-slate-800/30 p-8 text-center text-slate-400">
-              <CheckCircle2 className="mx-auto mb-3 h-12 w-12 text-slate-600" />
-              <p className="font-medium">Connect to OBS to control scenes, stream, and recording.</p>
-            </div>
-          )}
-
-          {isConnected && (
-            <>
-              {/* Scenes */}
-              <section className="rounded-xl border border-slate-700/60 bg-slate-800/40 shadow-xl">
-                <h2 className="flex items-center gap-2 border-b border-slate-700/60 px-5 py-4 text-lg font-semibold text-white">
-                  <Tv className="h-5 w-5 text-slate-400" />
-                  Scenes
-                </h2>
-                <div className="p-5">
-                  {scenes.length === 0 ? (
-                    <p className="text-sm text-slate-400">No scenes or loading…</p>
+          {/* Marquee row (100% width, below Connection, above Event & Matchup) + Event & Matchup row */}
+          <div className="mb-4 w-full shrink-0 flex flex-col gap-4">
+            <EventAndMatchupEditor
+              renderMarqueeRow={(marqueeContent) => marqueeContent}
+              renderSections={({ eventMatchup, standings, playerList, paths, fontSizes }) => (
+                <section className="w-full shrink-0 flex flex-row flex-wrap items-stretch min-h-0 gap-4">
+                  <ResizablePanel
+                    defaultWidth={420}
+                    storageKey="streaming-terminal-event-matchup-card-width"
+                  >
+                    <div className="rounded-xl border border-slate-700/60 bg-slate-800/40 shadow-xl overflow-visible h-full min-h-0 overflow-y-auto">
+                      {eventMatchup}
+                    </div>
+                  </ResizablePanel>
+                  <ResizablePanel
+                    defaultWidth={320}
+                    storageKey="streaming-terminal-standings-card-width"
+                  >
+                    <div className="h-full min-h-0 overflow-y-auto rounded-xl border border-slate-700/60 bg-slate-800/40 shadow-xl p-4 flex flex-col gap-4">
+                      {standings}
+                      {playerList}
+                      {fontSizes}
+                      {paths}
+                    </div>
+                  </ResizablePanel>
+                  <ResizablePanel
+                    defaultWidth={280}
+                    storageKey="streaming-terminal-third-column-card-width"
+                  >
+                  {!isConnected ? (
+                    <div className="shrink-0 self-stretch min-h-0 rounded-xl border border-slate-700/60 bg-slate-800/40 shadow-xl overflow-hidden flex flex-col h-full">
+                      <div className="p-8 text-center text-slate-400 flex-1 flex flex-col items-center justify-center min-h-0">
+                        <CheckCircle2 className="mb-3 h-12 w-12 text-slate-600" />
+                        <p className="font-medium">Connect to OBS to control scenes, stream, and recording.</p>
+                      </div>
+                    </div>
                   ) : (
-                    <div className="flex flex-wrap gap-2">
-                      {scenes.map((s) => (
-                        <button
-                          key={s.sceneName}
-                          type="button"
-                          onClick={() => setCurrentProgramScene(s.sceneName)}
-                          disabled={actionLoading !== null}
-                          className={`rounded-lg border px-4 py-2.5 text-sm font-medium transition ${
-                            currentScene === s.sceneName
-                              ? "border-emerald-500 bg-emerald-500/20 text-emerald-400"
-                              : "border-slate-600 bg-slate-800/80 text-slate-200 hover:border-slate-500 hover:bg-slate-700/80"
-                          } disabled:opacity-50`}
-                        >
-                          {actionLoading === `scene-${s.sceneName}` ? (
-                            <Loader2 className="inline h-4 w-4 animate-spin" />
-                          ) : (
-                            <Circle className={`inline h-2 w-2 ${currentScene === s.sceneName ? "fill-current" : ""}`} />
-                          )}{" "}
-                          {s.sceneName}
-                        </button>
-                      ))}
+                    <div className="shrink-0 self-stretch min-h-0 rounded-xl border border-slate-700/60 bg-slate-800/40 shadow-xl overflow-hidden flex flex-col h-full">
+                      <h2 className="flex items-center gap-2 border-b border-slate-700/60 px-4 py-3 text-base font-semibold text-white shrink-0">
+                        <Settings2 className="h-4 w-4 text-slate-400" />
+                        OBS Controls
+                      </h2>
+                      <div className="p-4 space-y-4 overflow-y-auto min-h-0 flex-1">
+                        {/* Stream */}
+                        <div className="rounded-lg border border-slate-600/60 bg-slate-900/40 overflow-hidden">
+                          <h3 className="flex items-center gap-2 border-b border-slate-600/60 px-3 py-2 text-sm font-semibold text-slate-200">
+                            <Radio className="h-4 w-4 text-slate-400" />
+                            Stream
+                          </h3>
+                          <div className="space-y-3 p-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-slate-400">Status</span>
+                              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${streamState === "live" ? "bg-red-500/20 text-red-400" : streamState === "reconnecting" ? "bg-amber-500/20 text-amber-400" : "bg-slate-600/50 text-slate-400"}`}>
+                                {streamState === "live" && "Live"}
+                                {streamState === "reconnecting" && "Reconnecting…"}
+                                {streamState === "offline" && "Offline"}
+                                {streamState === "unknown" && "—"}
+                              </span>
+                            </div>
+                            {streamTimecode && <p className="text-xs text-slate-400">Time: {streamTimecode}</p>}
+                            <div className="flex gap-2">
+                              <button type="button" onClick={startStream} disabled={streamState === "live" || actionLoading !== null} className="flex-1 rounded-lg bg-emerald-600 py-2 text-xs font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50">
+                                {actionLoading === "stream-start" ? <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" /> : "Start stream"}
+                              </button>
+                              <button type="button" onClick={stopStream} disabled={streamState !== "live" || actionLoading !== null} className="flex-1 rounded-lg bg-red-600/80 py-2 text-xs font-medium text-white transition hover:bg-red-600 disabled:opacity-50">
+                                {actionLoading === "stream-stop" ? <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" /> : "Stop stream"}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                        {/* Recording */}
+                        <div className="rounded-lg border border-slate-600/60 bg-slate-900/40 overflow-hidden">
+                          <h3 className="flex items-center gap-2 border-b border-slate-600/60 px-3 py-2 text-sm font-semibold text-slate-200">
+                            <Square className="h-4 w-4 text-slate-400" />
+                            Recording
+                          </h3>
+                          <div className="space-y-3 p-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-slate-400">Status</span>
+                              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${recordState === "recording" ? "bg-red-500/20 text-red-400" : "bg-slate-600/50 text-slate-400"}`}>
+                                {recordState === "recording" && "Recording"}
+                                {recordState === "stopped" && "Stopped"}
+                                {recordState === "unknown" && "—"}
+                              </span>
+                            </div>
+                            {recordTimecode && <p className="text-xs text-slate-400">Time: {recordTimecode}</p>}
+                            <div className="flex gap-2">
+                              <button type="button" onClick={startRecord} disabled={recordState === "recording" || actionLoading !== null} className="flex-1 rounded-lg bg-emerald-600 py-2 text-xs font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50">
+                                {actionLoading === "record-start" ? <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" /> : "Start recording"}
+                              </button>
+                              <button type="button" onClick={stopRecord} disabled={recordState !== "recording" || actionLoading !== null} className="flex-1 rounded-lg bg-red-600/80 py-2 text-xs font-medium text-white transition hover:bg-red-600 disabled:opacity-50">
+                                {actionLoading === "record-stop" ? <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" /> : "Stop recording"}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                        {/* Scenes */}
+                        <div className="rounded-lg border border-slate-600/60 bg-slate-900/40 overflow-hidden">
+                          <h3 className="flex items-center gap-2 border-b border-slate-600/60 px-3 py-2 text-sm font-semibold text-slate-200">
+                            <Tv className="h-4 w-4 text-slate-400" />
+                            Scenes
+                          </h3>
+                          <div className="p-3">
+                            {scenes.length === 0 ? (
+                              <p className="text-xs text-slate-400">No scenes or loading…</p>
+                            ) : (
+                              <div className="flex flex-wrap gap-1.5">
+                                {scenes.map((s) => (
+                                  <button
+                                    key={s.sceneName}
+                                    type="button"
+                                    onClick={() => setCurrentProgramScene(s.sceneName)}
+                                    disabled={actionLoading !== null}
+                                    className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium transition ${currentScene === s.sceneName ? "border-emerald-500 bg-emerald-500/20 text-emerald-400" : "border-slate-600 bg-slate-800/80 text-slate-200 hover:border-slate-500 hover:bg-slate-700/80"} disabled:opacity-50`}
+                                  >
+                                    {actionLoading === `scene-${s.sceneName}` ? <Loader2 className="inline h-3 w-3 animate-spin" /> : <Circle className={`inline h-1.5 w-1.5 ${currentScene === s.sceneName ? "fill-current" : ""}`} />}
+                                    {" "}{s.sceneName}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   )}
-                </div>
-              </section>
-
-              {/* Stream & Recording */}
-              <div className="grid gap-6 sm:grid-cols-2">
-                <section className="rounded-xl border border-slate-700/60 bg-slate-800/40 shadow-xl">
-                  <h2 className="flex items-center gap-2 border-b border-slate-700/60 px-5 py-4 text-lg font-semibold text-white">
-                    <Radio className="h-5 w-5 text-slate-400" />
-                    Stream
-                  </h2>
-                  <div className="space-y-4 p-5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-slate-400">Status</span>
-                      <span
-                        className={`rounded-full px-3 py-1 text-sm font-medium ${
-                          streamState === "live"
-                            ? "bg-red-500/20 text-red-400"
-                            : streamState === "reconnecting"
-                              ? "bg-amber-500/20 text-amber-400"
-                              : "bg-slate-600/50 text-slate-400"
-                        }`}
-                      >
-                        {streamState === "live" && "Live"}
-                        {streamState === "reconnecting" && "Reconnecting…"}
-                        {streamState === "offline" && "Offline"}
-                        {streamState === "unknown" && "—"}
-                      </span>
-                    </div>
-                    {streamTimecode && <p className="text-sm text-slate-400">Time: {streamTimecode}</p>}
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={startStream}
-                        disabled={streamState === "live" || actionLoading !== null}
-                        className="flex-1 rounded-lg bg-emerald-600 py-2.5 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50"
-                      >
-                        {actionLoading === "stream-start" ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : "Start stream"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={stopStream}
-                        disabled={streamState !== "live" || actionLoading !== null}
-                        className="flex-1 rounded-lg bg-red-600/80 py-2.5 text-sm font-medium text-white transition hover:bg-red-600 disabled:opacity-50"
-                      >
-                        {actionLoading === "stream-stop" ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : "Stop stream"}
-                      </button>
-                    </div>
-                  </div>
+                  </ResizablePanel>
                 </section>
+              )}
+            />
+          </div>
 
-                <section className="rounded-xl border border-slate-700/60 bg-slate-800/40 shadow-xl">
-                  <h2 className="flex items-center gap-2 border-b border-slate-700/60 px-5 py-4 text-lg font-semibold text-white">
-                    <Square className="h-5 w-5 text-slate-400" />
-                    Recording
-                  </h2>
-                  <div className="space-y-4 p-5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-slate-400">Status</span>
-                      <span
-                        className={`rounded-full px-3 py-1 text-sm font-medium ${
-                          recordState === "recording" ? "bg-red-500/20 text-red-400" : "bg-slate-600/50 text-slate-400"
-                        }`}
-                      >
-                        {recordState === "recording" && "Recording"}
-                        {recordState === "stopped" && "Stopped"}
-                        {recordState === "unknown" && "—"}
-                      </span>
-                    </div>
-                    {recordTimecode && <p className="text-sm text-slate-400">Time: {recordTimecode}</p>}
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={startRecord}
-                        disabled={recordState === "recording" || actionLoading !== null}
-                        className="flex-1 rounded-lg bg-emerald-600 py-2.5 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50"
-                      >
-                        {actionLoading === "record-start" ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : "Start recording"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={stopRecord}
-                        disabled={recordState !== "recording" || actionLoading !== null}
-                        className="flex-1 rounded-lg bg-red-600/80 py-2.5 text-sm font-medium text-white transition hover:bg-red-600 disabled:opacity-50"
-                      >
-                        {actionLoading === "record-stop" ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : "Stop recording"}
-                      </button>
-                    </div>
-                  </div>
-                </section>
-              </div>
-            </>
-          )}
+          {/* Spacer / future cards area */}
+          <div className="relative flex-1 min-h-[120px] w-full" />
         </main>
       </div>
     </>

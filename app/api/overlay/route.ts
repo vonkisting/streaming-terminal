@@ -98,14 +98,14 @@ function buildOverlayHtml(m: MarqueeData): string {
             ${m.showMatchupRace && m.showMatchupScore ? `<span style="width:48px;height:100%;display:flex;align-items:center;justify-content:center;background:#fff;border:2px solid rgba(148,163,184,0.7);border-radius:9999px 0 0 9999px;color:#000;font-size:24px;font-weight:700;">${escapeHtml(m.matchupPlayer1Race)}</span>` : ""}
             ${m.showMatchupScore ? `<span style="font-size:20px;font-weight:700;color:#fff;">${m.matchupPlayer1Score}</span><span style="width:1px;background:rgba(255,255,255,0.5);"></span>` : ""}
             <div style="flex:1;min-width:0;display:flex;align-items:center;justify-content:center;position:relative;">
-              <img src="${firstBallSrc}" alt="" style="position:absolute;left:0;bottom:100%;margin-bottom:12px;width:48px;height:48px;object-fit:contain;${suitsSwapped ? "transform:scale(1.15)" : "transform:scale(1.2)"};" onerror="this.style.display='none'">
+              <img src="${firstBallSrc}" alt="" style="position:absolute;left:0;bottom:100%;margin-bottom:12px;width:48px;height:48px;object-fit:contain;border:1px solid #000;border-radius:50%;${suitsSwapped ? "transform:scale(1.15)" : "transform:scale(1.2)"};" onerror="this.style.display='none'">
               <span style="font-weight:600;text-transform:uppercase;color:rgba(255,255,255,0.95);text-align:center;font-size:${playerNameSize}px;">${escapeHtml(player1Name)}</span>
             </div>
           </div>
           <span style="font-size:24px;font-weight:700;color:#000;background:#fff;border:2px solid rgba(148,163,184,0.7);padding:0 8px;display:flex;align-items:center;justify-content:center;">VS</span>
           <div style="display:flex;align-items:stretch;gap:8px;flex:1;min-width:0;justify-content:flex-end;border-radius:0 9999px 9999px 0;background:linear-gradient(to bottom,#1e3a8a,#1e40af,#000);padding:8px 12px;margin:-8px -12px -8px -12px;">
             <div style="flex:1;min-width:0;display:flex;align-items:center;justify-content:center;position:relative;">
-              <img src="${secondBallSrc}" alt="" style="position:absolute;right:0;bottom:100%;margin-bottom:12px;width:48px;height:48px;object-fit:contain;${suitsSwapped ? "transform:scale(1.2)" : "transform:scale(1.15)"};" onerror="this.style.display='none'">
+              <img src="${secondBallSrc}" alt="" style="position:absolute;right:0;bottom:100%;margin-bottom:12px;width:48px;height:48px;object-fit:contain;border:1px solid #000;border-radius:50%;${suitsSwapped ? "transform:scale(1.2)" : "transform:scale(1.15)"};" onerror="this.style.display='none'">
               <span style="font-weight:600;text-transform:uppercase;color:rgba(255,255,255,0.95);text-align:center;font-size:${playerNameSize}px;">${escapeHtml(player2Name)}</span>
             </div>
             ${m.showMatchupScore ? `<span style="width:1px;background:rgba(255,255,255,0.5);"></span><span style="font-size:20px;font-weight:700;color:#fff;">${m.matchupPlayer2Score}</span>` : ""}
@@ -147,7 +147,15 @@ interface MatchupCardImageData {
   ball15DataUri: string;
 }
 
-/** Builds a full HTML document containing only the matchup card. Used for matchupcard.html on GitHub. */
+/** Exact Tailwind-equivalent styles from MatchupCard.tsx preview for matchupcard.html */
+const TOP_BOTTOM_PANEL_STYLE =
+  "color:#fff;font-family:system-ui,sans-serif;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1),0 2px 4px -2px rgba(0,0,0,0.1);background:linear-gradient(to right,rgba(0,0,0,0.5),#b45309,rgba(0,0,0,0.5));font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.95)";
+const MIDDLE_PANEL_STYLE =
+  "border:1px solid rgba(148,163,184,0.7);color:#fff;font-family:system-ui,sans-serif;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1),0 2px 4px -2px rgba(0,0,0,0.1);background:linear-gradient(to bottom,rgba(19,78,74,0.95),rgba(17,94,89,0.9),rgba(30,41,59,0.95));background-size:100% 200%";
+const CUEBALL_SVG =
+  `<svg viewBox="0 0 24 24" style="width:63px;height:63px;filter:drop-shadow(0 4px 6px rgba(0,0,0,0.1));" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="cueball-shine" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#fff"/><stop offset="40%" stop-color="#f8fafc"/><stop offset="100%" stop-color="#e2e8f0"/></linearGradient></defs><circle cx="12" cy="12" r="11" fill="url(#cueball-shine)" stroke="#000" stroke-width="1"/></svg>`;
+
+/** Builds a full HTML document containing only the matchup card. Matches MatchupCard.tsx preview exactly. */
 function buildMatchupCardOnlyHtml(m: MarqueeData, imageData?: MatchupCardImageData, relativePaths?: boolean): string {
   const eventLabel = (m.eventName || "").trim() || "\u00A0";
   if (!eventLabel || eventLabel === "\u00A0") {
@@ -182,35 +190,51 @@ function buildMatchupCardOnlyHtml(m: MarqueeData, imageData?: MatchupCardImageDa
     ? (suitsSwapped ? imageData.ball1DataUri : imageData.ball15DataUri)
     : (suitsSwapped ? ball1 : ball15);
   const roundLabel = (m.matchupRound || "").trim() || "\u00A0";
-  const cardMinHeight = topSectionHeight + middleSectionMinHeight + bottomSectionHeight + 2 + 2 + 8 + 8;
-  const matchupCardHtml = `
-    <div id="matchup-card-root"><div class="matchup-card" style="width:672px;min-width:672px;min-height:${cardMinHeight}px;max-width:100%;margin:0 auto;display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 16px;flex-shrink:0;box-sizing:border-box;">
-      <div style="width:92%;max-width:420px;min-width:420px;min-height:${topSectionHeight}px;display:flex;align-items:center;justify-content:center;background:linear-gradient(to right,rgba(0,0,0,0.5),#b45309,rgba(0,0,0,0.5));clip-path:polygon(8% 0,92% 0,100% 100%,0 100%);color:#fff;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;font-size:${eventNameSize}px;">${escapeHtml(eventLabel)}</div>
-      <div style="position:relative;width:100%;min-width:672px;">
-        ${whoseTurn === 1 ? `<div style="position:absolute;right:100%;top:50%;transform:translateY(-50%);margin-right:8px;min-width:28px;min-height:28px;"><svg viewBox="0 0 24 24" style="width:28px;height:28px;min-width:28px;min-height:28px;"><circle cx="12" cy="12" r="11" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.5"/></svg></div>` : ""}
-        ${whoseTurn === 2 ? `<div style="position:absolute;left:100%;top:50%;transform:translateY(-50%);margin-left:8px;min-width:28px;min-height:28px;"><svg viewBox="0 0 24 24" style="width:28px;height:28px;min-width:28px;min-height:28px;"><circle cx="12" cy="12" r="11" fill="#f8fafc" stroke="#cbd5e1" stroke-width="0.5"/></svg></div>` : ""}
-        <div style="display:flex;align-items:stretch;justify-content:space-between;gap:0;min-height:${middleSectionMinHeight}px;min-width:672px;width:100%;border:1px solid rgba(148,163,184,0.7);border-radius:9999px;padding:8px 12px;background:linear-gradient(to bottom,#134e4a,#155e5a,#1e293b);">
-          <div style="display:flex;align-items:stretch;gap:8px;flex:1;min-width:220px;justify-content:flex-start;border-radius:9999px 0 0 9999px;background:linear-gradient(to bottom,#450a0a,#7f1d1d,#000);padding:8px 12px;margin:-8px -12px -8px -12px;">
-            ${m.showMatchupRace && m.showMatchupScore ? `<span style="width:48px;min-width:48px;min-height:${middleSectionMinHeight}px;height:100%;display:flex;align-items:center;justify-content:center;background:#fff;border:2px solid rgba(148,163,184,0.7);border-radius:9999px 0 0 9999px;color:#000;font-size:24px;font-weight:700;">${escapeHtml(m.matchupPlayer1Race)}</span>` : ""}
-            ${m.showMatchupScore ? `<span style="font-size:20px;font-weight:700;color:#fff;min-width:28px;min-height:20px;">${m.matchupPlayer1Score}</span><span style="width:1px;min-width:1px;min-height:20px;background:rgba(255,255,255,0.5);"></span>` : ""}
-            <div style="flex:1;min-width:80px;display:flex;align-items:center;justify-content:center;position:relative;">
-              <img src="${firstBallSrc}" alt="" style="position:absolute;left:0;bottom:100%;margin-bottom:12px;width:48px;height:48px;min-width:48px;min-height:48px;object-fit:contain;${suitsSwapped ? "transform:scale(1.15)" : "transform:scale(1.2)"};" onerror="this.style.display='none'">
-              <span style="font-weight:600;text-transform:uppercase;color:rgba(255,255,255,0.95);text-align:center;font-size:${playerNameSize}px;min-height:${playerNameSize + 4}px;">${escapeHtml(player1Name)}</span>
-            </div>
-          </div>
-          <span style="font-size:24px;font-weight:700;color:#000;background:#fff;border:2px solid rgba(148,163,184,0.7);padding:0 8px;min-width:40px;min-height:${middleSectionMinHeight}px;display:flex;align-items:center;justify-content:center;">VS</span>
-          <div style="display:flex;align-items:stretch;gap:8px;flex:1;min-width:220px;justify-content:flex-end;border-radius:0 9999px 9999px 0;background:linear-gradient(to bottom,#1e3a8a,#1e40af,#000);padding:8px 12px;margin:-8px -12px -8px -12px;">
-            <div style="flex:1;min-width:80px;display:flex;align-items:center;justify-content:center;position:relative;">
-              <img src="${secondBallSrc}" alt="" style="position:absolute;right:0;bottom:100%;margin-bottom:12px;width:48px;height:48px;min-width:48px;min-height:48px;object-fit:contain;${suitsSwapped ? "transform:scale(1.2)" : "transform:scale(1.15)"};" onerror="this.style.display='none'">
-              <span style="font-weight:600;text-transform:uppercase;color:rgba(255,255,255,0.95);text-align:center;font-size:${playerNameSize}px;min-height:${playerNameSize + 4}px;">${escapeHtml(player2Name)}</span>
-            </div>
-            ${m.showMatchupScore ? `<span style="width:1px;min-width:1px;min-height:20px;background:rgba(255,255,255,0.5);"></span><span style="font-size:20px;font-weight:700;color:#fff;min-width:28px;min-height:20px;">${m.matchupPlayer2Score}</span>` : ""}
-            ${m.showMatchupRace && m.showMatchupScore ? `<span style="width:48px;min-width:48px;min-height:${middleSectionMinHeight}px;height:100%;display:flex;align-items:center;justify-content:center;background:#fff;border:2px solid rgba(148,163,184,0.7);border-radius:0 9999px 9999px 0;color:#000;font-size:24px;font-weight:700;">${escapeHtml(m.matchupPlayer2Race)}</span>` : ""}
-          </div>
-        </div>
-      </div>
-      <div style="width:92%;max-width:420px;min-width:420px;min-height:${bottomSectionHeight}px;display:flex;align-items:center;justify-content:center;background:linear-gradient(to right,rgba(0,0,0,0.5),#b45309,rgba(0,0,0,0.5));clip-path:polygon(0 0,100% 0,92% 100%,8% 100%);color:#fff;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;font-size:${subTextSize}px;">${escapeHtml(roundLabel)}</div>
-    </div></div>`;
+
+  const topSection = `<div style="width:92%;max-width:420px;display:flex;align-items:center;justify-content:center;min-height:${topSectionHeight}px;clip-path:polygon(8% 0,92% 0,100% 100%,0 100%);${TOP_BOTTOM_PANEL_STYLE};font-size:${eventNameSize}px;">${escapeHtml(eventLabel)}</div>`;
+
+  const cueBallLeft = whoseTurn === 1
+    ? `<div style="position:absolute;right:100%;top:50%;transform:translateY(-50%);display:flex;align-items:center;margin-right:8px;min-width:63px;min-height:63px;">${CUEBALL_SVG}</div>`
+    : "";
+  const cueBallRight = whoseTurn === 2
+    ? `<div style="position:absolute;left:100%;top:50%;transform:translateY(-50%);display:flex;align-items:center;margin-left:8px;min-width:63px;min-height:63px;">${CUEBALL_SVG}</div>`
+    : "";
+
+  const raceBadgeP1 = m.showMatchupRace && m.showMatchupScore
+    ? `<div style="flex-shrink:0;align-self:stretch;margin-left:-12px;margin-right:0;"><span style="width:48px;height:100%;display:flex;align-items:center;justify-content:center;background:#fff;border:2px solid rgba(148,163,184,0.7);border-radius:9999px 0 0 9999px;color:#000;font-size:24px;font-weight:700;letter-spacing:0.05em;text-align:center;padding:0 2px;overflow:hidden;">${escapeHtml(m.matchupPlayer1Race)}</span></div>`
+    : "";
+  const scoreP1 = m.showMatchupScore
+    ? `<div style="flex-shrink:0;display:flex;align-items:center;justify-content:center;padding:0 2px;"><span style="font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;color:#fff;">${m.matchupPlayer1Score}</span></div><div style="width:1px;align-self:stretch;min-height:20px;background:rgba(255,255,255,0.5);flex-shrink:0;"></div>`
+    : "";
+  const player1Block = `<div style="flex:1;min-width:0;display:flex;align-items:center;justify-content:center;position:relative;"><img src="${firstBallSrc}" alt="" style="position:absolute;left:0;bottom:100%;margin-bottom:20px;width:56px;height:56px;object-fit:contain;border:1px solid #000;border-radius:50%;${suitsSwapped ? "transform:scale(1.15)" : "transform:scale(1.2)"};" onerror="this.style.display='none'"><span style="font-weight:600;text-transform:uppercase;color:rgba(255,255,255,0.95);text-align:center;font-size:${playerNameSize}px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(player1Name)}</span></div>`;
+
+  const vsBlock = `<div style="flex-shrink:0;position:relative;z-index:2;display:flex;align-items:stretch;margin-top:-8px;margin-bottom:-8px;min-height:${middleSectionMinHeight + 16}px;"><span style="font-size:24px;font-weight:700;color:#000;letter-spacing:0.05em;background:#fff;border:2px solid rgba(148,163,184,0.7);padding:0 8px;display:flex;align-items:center;justify-content:center;height:100%;box-sizing:border-box;">VS</span></div>`;
+
+  const player2Block = `<div style="flex:1;min-width:0;display:flex;align-items:center;justify-content:center;position:relative;"><img src="${secondBallSrc}" alt="" style="position:absolute;right:0;bottom:100%;margin-bottom:20px;width:56px;height:56px;object-fit:contain;border:1px solid #000;border-radius:50%;${suitsSwapped ? "transform:scale(1.2)" : "transform:scale(1.15)"};" onerror="this.style.display='none'"><span style="font-weight:600;text-transform:uppercase;color:rgba(255,255,255,0.95);text-align:center;font-size:${playerNameSize}px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(player2Name)}</span></div>`;
+  const scoreP2 = m.showMatchupScore
+    ? `<div style="width:1px;align-self:stretch;min-height:20px;background:rgba(255,255,255,0.5);flex-shrink:0;"></div><div style="flex-shrink:0;display:flex;align-items:center;justify-content:center;padding:0 2px;"><span style="font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;color:#fff;">${m.matchupPlayer2Score}</span></div>`
+    : "";
+  const raceBadgeP2 = m.showMatchupRace && m.showMatchupScore
+    ? `<div style="flex-shrink:0;align-self:stretch;margin-right:-12px;margin-left:0;"><span style="width:48px;height:100%;display:flex;align-items:center;justify-content:center;background:#fff;border:2px solid rgba(148,163,184,0.7);border-radius:0 9999px 9999px 0;color:#000;font-size:24px;font-weight:700;letter-spacing:0.05em;text-align:center;padding:0 2px;overflow:hidden;">${escapeHtml(m.matchupPlayer2Race)}</span></div>`
+    : "";
+
+  const middlePanel = `<div style="display:flex;align-items:stretch;justify-content:space-between;gap:0;min-height:${middleSectionMinHeight}px;width:100%;border-radius:9999px;padding:8px 12px;${MIDDLE_PANEL_STYLE};">
+  <div style="display:flex;align-items:stretch;gap:8px;flex:1;min-width:0;justify-content:flex-start;border-radius:9999px 0 0 9999px;background:linear-gradient(to bottom,#450a0a,rgba(127,29,29,0.95),#000);margin:-8px -12px -8px -8px;padding:8px 12px;position:relative;z-index:0;">${raceBadgeP1}${scoreP1}${player1Block}</div>
+  ${vsBlock}
+  <div style="display:flex;align-items:stretch;gap:8px;flex:1;min-width:0;justify-content:flex-end;border-radius:0 9999px 9999px 0;background:linear-gradient(to bottom,#172554,rgba(30,58,138,0.95),#000);margin:-8px -8px -8px -12px;padding:8px 12px;position:relative;z-index:0;">${player2Block}${scoreP2}${raceBadgeP2}</div>
+</div>`;
+
+  const bottomSection = `<div style="width:92%;max-width:420px;display:flex;align-items:center;justify-content:center;min-height:${bottomSectionHeight}px;clip-path:polygon(0 0,100% 0,92% 100%,8% 100%);${TOP_BOTTOM_PANEL_STYLE};font-size:${subTextSize}px;">${escapeHtml(roundLabel)}</div>`;
+
+  const cardInner = `<div style="width:100%;max-width:672px;margin:0 auto;display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 16px;flex-shrink:0;box-sizing:border-box;">
+${topSection}
+<div style="position:relative;width:100%;">
+${cueBallLeft}${cueBallRight}
+${middlePanel}
+</div>
+${bottomSection}
+</div>`;
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -223,11 +247,10 @@ function buildMatchupCardOnlyHtml(m: MarqueeData, imageData?: MatchupCardImageDa
   <style>
     *{box-sizing:border-box}
     html,body{margin:0;padding:0;width:1920px;height:1080px;background:rgba(0,0,0,0.01);display:flex;align-items:center;justify-content:center;font-family:system-ui,sans-serif}
-    .matchup-card{flex-shrink:0}
   </style>
 </head>
 <body>
-${matchupCardHtml}
+${cardInner}
 </body>
 </html>`;
 }

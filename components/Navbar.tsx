@@ -34,7 +34,7 @@ export default function Navbar() {
 
   return (
     <nav className="sticky top-0 z-10 bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 border-b border-slate-800/50 shadow-lg">
-      <div className="flex items-center h-16 px-6">
+      <div className="flex items-center h-12 px-6">
         <Link href="/" className="flex items-center gap-2">
           {OBS_CONNECTION_ENABLED && (
             <span

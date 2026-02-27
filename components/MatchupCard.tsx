@@ -7,7 +7,7 @@ function CueBallIcon({ className }: { className?: string }) {
     <span className={`inline-flex flex-shrink-0 ${className ?? ""}`} aria-hidden>
       <svg
         viewBox="0 0 24 24"
-        className="w-6 h-6 sm:w-7 sm:h-7 drop-shadow-md"
+        className="w-[54px] h-[54px] sm:w-[63px] sm:h-[63px] drop-shadow-md"
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
       >
@@ -18,7 +18,7 @@ function CueBallIcon({ className }: { className?: string }) {
             <stop offset="100%" stopColor="#e2e8f0" />
           </linearGradient>
         </defs>
-        <circle cx="12" cy="12" r="11" fill="url(#cueball-shine)" stroke="#cbd5e1" strokeWidth="0.5" />
+        <circle cx="12" cy="12" r="11" fill="url(#cueball-shine)" stroke="#000" strokeWidth="1" />
       </svg>
     </span>
   );
@@ -115,7 +115,7 @@ export default function MatchupCard() {
               <img
                 src={firstBallSrc}
                 alt={firstBallAlt}
-                className={`absolute left-0 bottom-full mb-3 w-12 h-12 sm:w-14 sm:h-14 object-contain pointer-events-none ${suitsSwapped ? "scale-[1.15]" : "scale-[1.2]"}`}
+                className={`absolute left-0 bottom-full mb-5 w-12 h-12 sm:w-14 sm:h-14 object-contain pointer-events-none border border-black rounded-full ${suitsSwapped ? "scale-[1.15]" : "scale-[1.2]"}`}
                 aria-hidden
               />
               <span
@@ -138,7 +138,7 @@ export default function MatchupCard() {
               <img
                 src={secondBallSrc}
                 alt={secondBallAlt}
-                className={`absolute right-0 bottom-full mb-3 w-12 h-12 sm:w-14 sm:h-14 object-contain pointer-events-none ${suitsSwapped ? "scale-[1.2]" : "scale-[1.15]"}`}
+                className={`absolute right-0 bottom-full mb-5 w-12 h-12 sm:w-14 sm:h-14 object-contain pointer-events-none border border-black rounded-full ${suitsSwapped ? "scale-[1.2]" : "scale-[1.15]"}`}
                 aria-hidden
               />
               <span
