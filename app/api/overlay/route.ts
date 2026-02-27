@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { writeFile, readFile } from "fs/promises";
 import path from "path";
 import { Client as FtpClient } from "basic-ftp";
-import { setMatchupCardHtml } from "@/lib/matchup-card-store";
+import { setMarqueeHtml, setMatchupCardHtml } from "@/lib/overlay-store";
 
 interface MarqueeData {
   eventName: string;
@@ -148,16 +148,13 @@ interface MatchupCardImageData {
 }
 
 /** Builds a full HTML document containing only the matchup card. Used for matchupcard.html on GitHub. */
-function buildMatchupCardOnlyHtml(m: MarqueeData, imageData?: MatchupCardImageData): string {
+function buildMatchupCardOnlyHtml(m: MarqueeData, imageData?: MatchupCardImageData, relativePaths?: boolean): string {
   const eventLabel = (m.eventName || "").trim() || "\u00A0";
   if (!eventLabel || eventLabel === "\u00A0") {
     return `<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=1920, height=1080"><title>Matchup Card</title><style>*{box-sizing:border-box}html,body{margin:0;padding:0;background:transparent!important;width:100%;min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:system-ui,sans-serif}</style></head>
-<body><div id="matchup-card-root"></div>
-<script>
-(function(){var url=window.location.pathname;setInterval(function(){fetch(url+(url.indexOf("?")>=0?"&":"?")+"t="+Date.now(),{cache:"no-store"}).then(function(r){return r.text();}).then(function(html){var doc=new DOMParser().parseFromString(html,"text/html");var newRoot=doc.getElementById("matchup-card-root");var root=document.getElementById("matchup-card-root");if(newRoot&&root)root.innerHTML=newRoot.innerHTML;}).catch(function(){});},1000);})();
-</script></body>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=1920, height=1080"><meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"><meta http-equiv="Pragma" content="no-cache"><meta http-equiv="Expires" content="0"><title>Matchup Card</title><style>*{box-sizing:border-box}html,body{margin:0;padding:0;width:1920px;height:1080px;background:rgba(0,0,0,0.01);display:flex;align-items:center;justify-content:center;font-family:system-ui,sans-serif}</style></head>
+<body><div style="color:#94a3b8;font-size:18px;">No event selected</div></body>
 </html>`;
   }
   const eventNameSize = m.eventNameFontSize ?? 12;
@@ -176,12 +173,14 @@ function buildMatchupCardOnlyHtml(m: MarqueeData, imageData?: MatchupCardImageDa
       : "—";
   const whoseTurn = m.matchupWhoseTurn ?? 1;
   const suitsSwapped = m.suitsImagesSwapped ?? false;
+  const ball1 = relativePaths ? "pool-ball-1.png" : "/pool-ball-1.png";
+  const ball15 = relativePaths ? "pool-ball-15.png" : "/pool-ball-15.png";
   const firstBallSrc = imageData
     ? (suitsSwapped ? imageData.ball15DataUri : imageData.ball1DataUri)
-    : (suitsSwapped ? "pool-ball-15.png" : "pool-ball-1.png");
+    : (suitsSwapped ? ball15 : ball1);
   const secondBallSrc = imageData
     ? (suitsSwapped ? imageData.ball1DataUri : imageData.ball15DataUri)
-    : (suitsSwapped ? "pool-ball-1.png" : "pool-ball-15.png");
+    : (suitsSwapped ? ball1 : ball15);
   const roundLabel = (m.matchupRound || "").trim() || "\u00A0";
   const cardMinHeight = topSectionHeight + middleSectionMinHeight + bottomSectionHeight + 2 + 2 + 8 + 8;
   const matchupCardHtml = `
@@ -211,32 +210,19 @@ function buildMatchupCardOnlyHtml(m: MarqueeData, imageData?: MatchupCardImageDa
         </div>
       </div>
       <div style="width:92%;max-width:420px;min-width:420px;min-height:${bottomSectionHeight}px;display:flex;align-items:center;justify-content:center;background:linear-gradient(to right,rgba(0,0,0,0.5),#b45309,rgba(0,0,0,0.5));clip-path:polygon(0 0,100% 0,92% 100%,8% 100%);color:#fff;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;font-size:${subTextSize}px;">${escapeHtml(roundLabel)}</div>
-    </div></div>
-  <script>
-(function(){
-  var url = window.location.pathname;
-  setInterval(function(){
-    fetch(url + (url.indexOf("?") >= 0 ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" })
-      .then(function(r){ return r.text(); })
-      .then(function(html){
-        var doc = new DOMParser().parseFromString(html, "text/html");
-        var newRoot = doc.getElementById("matchup-card-root");
-        var root = document.getElementById("matchup-card-root");
-        if (newRoot && root) root.innerHTML = newRoot.innerHTML;
-      })
-      .catch(function(){});
-  }, 1000);
-})();
-</script>`;
+    </div></div>`;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=1920, height=1080">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>Matchup Card</title>
   <style>
     *{box-sizing:border-box}
-    html,body{margin:0;padding:0;background:transparent!important;width:100%;min-width:672px;min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:system-ui,sans-serif}
+    html,body{margin:0;padding:0;width:1920px;height:1080px;background:rgba(0,0,0,0.01);display:flex;align-items:center;justify-content:center;font-family:system-ui,sans-serif}
     .matchup-card{flex-shrink:0}
   </style>
 </head>
@@ -278,6 +264,9 @@ function buildMarqueeOnlyHtml(m: MarqueeData): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=1920, height=1080">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>Marquee Overlay</title>
   <style>
     * { box-sizing: border-box; }
@@ -294,24 +283,20 @@ function buildMarqueeOnlyHtml(m: MarqueeData): string {
   <script>
 async function checkForUpdate() {
     try {
-        const response = await fetch(window.location.href, {
-            method: "HEAD",
-            cache: "no-store"
-        });
-
+        var url = window.location.href + (window.location.href.indexOf("?") >= 0 ? "&" : "?") + "_=" + Date.now();
+        const response = await fetch(url, { method: "HEAD", cache: "no-store" });
         const newTag = response.headers.get("ETag");
-
         if (!window.lastETag) {
             window.lastETag = newTag;
-        } else if (newTag !== window.lastETag) {
+        } else if (newTag && newTag !== window.lastETag) {
             location.reload();
         }
     } catch (e) {
         console.error("Update check failed", e);
     }
 }
-
-setInterval(checkForUpdate, 2000); // check every 2 seconds
+checkForUpdate();
+setInterval(checkForUpdate, 500);
 </script>
 </body>
 </html>`;
@@ -331,33 +316,16 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const marquee = body.marquee ?? body;
     const data = marquee as MarqueeData;
-    const matchupCardOnly = body.matchupCardOnly === true || body.matchupCardOnly === "1";
-
-    if (matchupCardOnly) {
-      let matchupCardImageData: MatchupCardImageData | undefined;
-      try {
-        const publicDir = path.join(process.cwd(), "public");
-        const [ball1Base64, ball15Base64] = await Promise.all([
-          readFile(path.join(publicDir, "pool-ball-1.png"), { encoding: "base64" }),
-          readFile(path.join(publicDir, "pool-ball-15.png"), { encoding: "base64" }),
-        ]);
-        matchupCardImageData = {
-          ball1DataUri: `data:image/png;base64,${ball1Base64}`,
-          ball15DataUri: `data:image/png;base64,${ball15Base64}`,
-        };
-      } catch {
-        // fall back to relative paths
-      }
-      const matchupCardHtml = buildMatchupCardOnlyHtml(data, matchupCardImageData);
-      setMatchupCardHtml(matchupCardHtml);
-      return NextResponse.json({ matchupCardHtml });
-    }
-
-    // marquee.html contains only the marquee (no matchup card); matchup card is pushed to OBS via injectHTML.
+    // marquee.html contains only the marquee (no matchup card).
     const marqueeOnlyHtml = buildMarqueeOnlyHtml(data);
+    const matchupCardOnlyHtml = buildMatchupCardOnlyHtml(data);
     const publicDir = path.join(process.cwd(), "public");
     const filePath = path.join(publicDir, "marquee.html");
-    await writeFile(filePath, marqueeOnlyHtml, "utf-8");
+    const matchupCardPath = path.join(publicDir, "matchupcard.html");
+    await Promise.all([
+      writeFile(filePath, marqueeOnlyHtml, "utf-8"),
+      writeFile(matchupCardPath, matchupCardOnlyHtml, "utf-8"),
+    ]);
 
     const ftpHost = process.env.FTP_HOST;
     const ftpUser = process.env.FTP_USER;
@@ -401,7 +369,40 @@ export async function POST(request: NextRequest) {
       ...(marqueeUrl && { marqueeUrl }),
     };
 
-    // Upload to GitHub and use GitHub Pages URL when configured.
+    // Build matchup card HTML with inline ball images so client can inject via data: URL (no external load).
+    let matchupCardImageData: MatchupCardImageData | undefined;
+    try {
+      const [ball1Buf, ball15Buf] = await Promise.all([
+        readFile(path.join(publicDir, "pool-ball-1.png")).catch(() => null),
+        readFile(path.join(publicDir, "pool-ball-15.png")).catch(() => null),
+      ]);
+      if (ball1Buf && ball15Buf) {
+        matchupCardImageData = {
+          ball1DataUri: `data:image/png;base64,${ball1Buf.toString("base64")}`,
+          ball15DataUri: `data:image/png;base64,${ball15Buf.toString("base64")}`,
+        };
+      }
+    } catch (_) {}
+    const matchupCardOnlyHtmlWithImages = buildMatchupCardOnlyHtml(data, matchupCardImageData, true);
+    responsePayload.matchupCardHtml = matchupCardOnlyHtmlWithImages;
+
+    // Store HTML so GET /api/overlay/marquee and /api/overlay/matchup-card can serve it (no GitHub needed).
+    setMarqueeHtml(marqueeOnlyHtml);
+    setMatchupCardHtml(matchupCardOnlyHtmlWithImages);
+
+    let overlayBase = (process.env.OVERLAY_PUBLIC_BASE_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/$/, "");
+    if (!overlayBase) {
+      try {
+        const u = new URL(request.url);
+        if (u.hostname !== "localhost" && u.hostname !== "127.0.0.1") overlayBase = u.origin;
+      } catch (_) {}
+    }
+    if (overlayBase) {
+      responsePayload.marqueeUrl = `${overlayBase}/api/overlay/marquee`;
+      responsePayload.matchupCardUrl = `${overlayBase}/api/overlay/matchup-card`;
+    }
+
+    // Upload to GitHub only when app-hosted URLs are not used (fallback; can cause 404 delay).
     const githubToken = process.env.GITHUB_TOKEN;
     const githubRepo = process.env.GITHUB_REPO;
     const githubBranch = process.env.GITHUB_BRANCH ?? "main";
@@ -433,11 +434,62 @@ export async function POST(request: NextRequest) {
         );
         if (putRes.ok) {
           marqueeUrl = githubPagesUrl;
-          responsePayload.marqueeUrl = githubPagesUrl;
+          if (!responsePayload.marqueeUrl) responsePayload.marqueeUrl = githubPagesUrl;
           responsePayload.githubUploadedAt = new Date().toISOString();
         } else {
           const errBody = await putRes.text();
           console.error("GitHub upload error (marquee.html):", putRes.status, errBody);
+        }
+
+        // Upload matchup card HTML (already built with inline ball images) to GitHub.
+        const matchupCardOnlyHtmlForGitHub = matchupCardOnlyHtmlWithImages;
+        // Use a unique filename per update so OBS always loads a new URL (no cache).
+        const matchupCardFilename = `matchupcard-${Date.now()}.html`;
+        const matchupCardPagesUrl = `https://${owner}.github.io/${repo}/${matchupCardFilename}`;
+        const putMatchupRes = await fetch(
+          `https://api.github.com/repos/${owner}/${repo}/contents/${matchupCardFilename}`,
+          {
+            method: "PUT",
+            headers: { Authorization: `Bearer ${githubToken}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" },
+            body: JSON.stringify({
+              message: "Update matchup card overlay",
+              content: Buffer.from(matchupCardOnlyHtmlForGitHub, "utf-8").toString("base64"),
+              branch: githubBranch,
+            }),
+          }
+        );
+        if (putMatchupRes.ok) {
+          if (!responsePayload.matchupCardUrl) responsePayload.matchupCardUrl = matchupCardPagesUrl;
+          // Delete old matchupcard-*.html files (keep only the one we just uploaded).
+          try {
+            const listRes = await fetch(
+              `https://api.github.com/repos/${owner}/${repo}/contents/?ref=${encodeURIComponent(githubBranch)}`,
+              { headers: { Authorization: `Bearer ${githubToken}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" } }
+            );
+            if (listRes.ok) {
+              const list = (await listRes.json()) as { type?: string; name?: string; sha?: string }[];
+              const matchupCardPattern = /^matchupcard-\d+\.html$/;
+              for (const item of list ?? []) {
+                if (item.type !== "file" || !item.name?.match(matchupCardPattern) || item.name === matchupCardFilename || !item.sha) continue;
+                const delRes = await fetch(
+                  `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(item.name)}`,
+                  {
+                    method: "DELETE",
+                    headers: { Authorization: `Bearer ${githubToken}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" },
+                    body: JSON.stringify({ message: "Remove old matchup card overlay", sha: item.sha, branch: githubBranch }),
+                  }
+                );
+                if (!delRes.ok && delRes.status !== 404) {
+                  console.error("GitHub delete old matchup card:", item.name, delRes.status, await delRes.text());
+                }
+              }
+            }
+          } catch (cleanupErr) {
+            console.error("GitHub cleanup old matchup cards:", cleanupErr);
+          }
+        } else {
+          const errBody = await putMatchupRes.text();
+          console.error("GitHub upload error (matchupcard.html):", putMatchupRes.status, errBody);
         }
       } catch (githubErr) {
         console.error("GitHub upload error:", githubErr);

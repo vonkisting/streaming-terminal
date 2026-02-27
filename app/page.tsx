@@ -1,5 +1,5 @@
-import TournamentDashboard from "@/components/TournamentDashboard";
+import OBSDashboard from "@/components/OBSDashboard";
 
 export default function HomePage() {
-  return <TournamentDashboard />;
+  return <OBSDashboard />;
 }

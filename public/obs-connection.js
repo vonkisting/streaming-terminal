@@ -48,22 +48,13 @@
   window.connectOBS = function connectOBS() {
     var config = window.__OBS_WS_CONFIG__ || {};
     var url = config.url || defaultUrl;
-    var password = config.password || "";
+    var password = (config.password || "").trim();
 
     dispatch("obs-connection-start");
     obs = new WebSocket(url);
 
     obs.onopen = function () {
-      console.log("Connected to OBS WebSocket");
-      obs.send(
-        JSON.stringify({
-          op: 1,
-          d: {
-            rpcVersion: 1,
-            authentication: password || undefined,
-          },
-        })
-      );
+      console.log("[OBS] WebSocket open, waiting for Hello...");
     };
 
     obs.onmessage = function (event) {
@@ -73,10 +64,29 @@
       } catch (e) {
         return;
       }
+      if (msg.op === 0) {
+        console.log("[OBS] Hello received, sending Identify");
+        var identify = {
+          op: 1,
+          d: {
+            rpcVersion: (msg.d && msg.d.rpcVersion) || 1,
+            eventSubscriptions: 1 << 2,
+          },
+        };
+        if (password) {
+          identify.d.authentication = password;
+        }
+        obs.send(JSON.stringify(identify));
+        return;
+      }
       if (msg.op === 2) {
         isConnected = true;
         console.log("Authenticated with OBS");
         dispatch("obs-connection-success");
+        obs.send(JSON.stringify({
+          op: 6,
+          d: { requestType: "GetCurrentProgramScene", requestId: "getCurrentScene", requestData: {} },
+        }));
         clearHeartbeat();
         heartbeatIntervalId = setInterval(function () {
           if (!obs || obs.readyState !== 1) return;
@@ -93,25 +103,35 @@
           }));
         }, HEARTBEAT_INTERVAL_MS);
       }
-      if (msg.op === 5 && msg.d && msg.d.requestId) {
-        if (String(msg.d.requestId).indexOf("heartbeat_") === 0) {
+      if ((msg.op === 5 || msg.op === 7) && msg.d) {
+        if (msg.d.requestId === "getCurrentScene" && msg.d.responseData) {
+          var sceneName = msg.d.responseData.currentProgramSceneName;
+          if (sceneName != null) dispatch("obs-current-scene", { sceneName: sceneName });
+          return;
+        }
+        if (msg.d.eventType === "CurrentProgramSceneChanged" && msg.d.eventData) {
+          var evScene = msg.d.eventData.sceneName;
+          if (evScene != null) dispatch("obs-current-scene", { sceneName: evScene });
+          return;
+        }
+        if (msg.d.requestId && String(msg.d.requestId).indexOf("heartbeat_") === 0) {
           if (heartbeatTimeoutId) {
             clearTimeout(heartbeatTimeoutId);
             heartbeatTimeoutId = null;
           }
           return;
         }
-        if (pendingRequests[msg.d.requestId]) {
-        var pending = pendingRequests[msg.d.requestId];
-        delete pendingRequests[msg.d.requestId];
-        clearTimeout(pending.timeoutId);
-        var status = msg.d.requestStatus;
-        if (status && status.result === false) {
-          var errMsg = status.comment || (status.code != null ? "Error " + status.code : "Request failed");
-          pending.reject(new Error(errMsg));
-        } else {
-          pending.resolve();
-        }
+        if (msg.d.requestId && pendingRequests[msg.d.requestId]) {
+          var pending = pendingRequests[msg.d.requestId];
+          delete pendingRequests[msg.d.requestId];
+          clearTimeout(pending.timeoutId);
+          var status = msg.d.requestStatus;
+          if (status && status.result === false) {
+            var errMsg = status.comment || (status.code != null ? "Error " + status.code : "Request failed");
+            pending.reject(new Error(errMsg));
+          } else {
+            pending.resolve(msg.d.responseData || undefined);
+          }
         }
         return;
       }
@@ -119,16 +139,31 @@
     };
 
     obs.onerror = function () {
-      console.warn("OBS WebSocket error – check that OBS is running and the WebSocket server is enabled at the URL in .env.local (NEXT_PUBLIC_OBS_WS_URL).");
+      console.warn("[OBS] WebSocket error");
     };
 
-    obs.onclose = function () {
-      clearHeartbeat();
+    obs.onclose = function (event) {
+      var code = event.code;
+      var reason = event.reason || "";
+      var message = "OBS connection failed.";
       if (!isConnected) {
-        dispatch("obs-connection-fail", { message: "OBS connection failed. Check OBS is running and NEXT_PUBLIC_OBS_WS_URL in .env.local." });
+        if (code === 1006) {
+          message = "Cannot reach OBS. Is the WebSocket server enabled and the IP/port correct? Check firewall on the OBS PC (allow port 4455).";
+        } else if (code === 1002) {
+          message = "OBS closed the connection (protocol error).";
+        } else if (code === 1003) {
+          message = "OBS closed the connection (unsupported data).";
+        } else if (reason) {
+          message = reason;
+        } else if (code) {
+          message = "Connection closed (code " + code + ").";
+        }
       } else {
-        dispatch("obs-connection-fail", { message: "OBS disconnected." });
+        message = reason || "OBS disconnected.";
       }
+      clearHeartbeat();
+      dispatch("obs-current-scene", { sceneName: null });
+      dispatch("obs-connection-fail", { message: message, code: code, reason: reason });
       isConnected = false;
       obs = null;
       var ids = Object.keys(pendingRequests);
@@ -137,83 +172,53 @@
         clearTimeout(pendingRequests[ids[i]].timeoutId);
       }
       pendingRequests = {};
-      console.log("OBS Disconnected");
+      console.log("[OBS] Disconnected", code, reason);
     };
   };
 
-  window.reloadBrowserSource = function (sourceName) {
+  function ensureConnected() {
+    if (!obs) throw new Error("OBS WebSocket not connected.");
+    if (obs.readyState === 0) throw new Error("OBS is still connecting. Wait a moment and try again.");
+    if (obs.readyState !== 1) throw new Error("OBS connection was closed.");
+  }
+
+  window.isOBSConnected = function () {
+    return !!(obs && isConnected && obs.readyState === 1);
+  };
+
+  window.disconnectOBS = function () {
+    if (obs) {
+      try { obs.close(); } catch (e) {}
+      obs = null;
+    }
+    isConnected = false;
+    clearHeartbeat();
+  };
+
+  window.obsRequest = function (requestType, requestData) {
     return new Promise(function (resolve, reject) {
-      if (!obs) {
-        reject(new Error("OBS WebSocket not connected. Load the page and wait for the connection, or set NEXT_PUBLIC_OBS_WS_URL in .env.local (e.g. ws://localhost:4455 if OBS is on this computer) and restart the app."));
+      try {
+        ensureConnected();
+      } catch (e) {
+        reject(e);
         return;
       }
-      if (obs.readyState === 0) {
-        reject(new Error("OBS is still connecting. Wait a moment and try again."));
-        return;
-      }
-      if (obs.readyState !== 1) {
-        reject(new Error("OBS connection was closed. Check OBS and the WebSocket server (Tools → WebSocket Server Settings). If OBS is on this computer, use ws://localhost:4455 in .env.local."));
-        return;
-      }
-      var requestId = "reloadBrowser-" + (++requestIdCounter) + "-" + Date.now();
+      var requestId = "req-" + (++requestIdCounter) + "-" + Date.now();
       var timeoutId = setTimeout(function () {
         if (pendingRequests[requestId]) {
           delete pendingRequests[requestId];
-          reject(new Error("OBS did not respond in time. Is the source name correct?"));
+          reject(new Error("OBS did not respond in time."));
         }
       }, RESPONSE_TIMEOUT_MS);
       pendingRequests[requestId] = { resolve: resolve, reject: reject, timeoutId: timeoutId };
-      obs.send(
-        JSON.stringify({
-          op: 6,
-          d: {
-            requestType: "ReloadBrowserSource",
-            requestId: requestId,
-            requestData: { sourceName: sourceName },
-          },
-        })
-      );
+      obs.send(JSON.stringify({
+        op: 6,
+        d: { requestType: requestType, requestId: requestId, requestData: requestData || {} },
+      }));
     });
   };
 
-  function escapeForTemplateLiteral(str) {
-    return String(str)
-      .replace(/\\/g, "\\\\")
-      .replace(/`/g, "\\`")
-      .replace(/\$/g, "\\$");
-  }
-
-  window.injectHTML = function injectHTML(sourceName, html) {
-    return new Promise(function (resolve, reject) {
-      if (!obs || obs.readyState !== 1) {
-        console.warn("[OBS] injectHTML skipped: not connected (obs=" + (obs ? obs.readyState : "null") + "). Source:", sourceName);
-        reject(new Error("OBS not connected"));
-        return;
-      }
-      var requestId = "injectHTML_" + Date.now() + "_" + Math.random().toString(36).slice(2);
-      var escaped = escapeForTemplateLiteral(html);
-      var javascript = "document.documentElement.innerHTML = `" + escaped + "`;";
-      var timeoutId = setTimeout(function () {
-        if (pendingRequests[requestId]) {
-          delete pendingRequests[requestId];
-          reject(new Error("OBS did not respond. Is the source name exactly 'Matchup Card'?"));
-        }
-      }, RESPONSE_TIMEOUT_MS);
-      pendingRequests[requestId] = { resolve: resolve, reject: reject, timeoutId: timeoutId };
-      console.log("[OBS] Pushing HTML to source:", sourceName, "requestId:", requestId);
-      obs.send(
-        JSON.stringify({
-          op: 6,
-          d: {
-            requestType: "ExecuteJavaScript",
-            requestId: requestId,
-            requestData: {
-              sourceName: sourceName,
-              javascript: javascript,
-            },
-          },
-        })
-      );
-    });
+  window.reloadBrowserSource = function (inputName) {
+    return window.obsRequest("PressInputPropertiesButton", { inputName: inputName, propertyName: "refreshnocache" });
   };
 })();

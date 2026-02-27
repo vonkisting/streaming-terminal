@@ -33,11 +33,20 @@ const MarqueeContext = createContext<{
   setStreamUrl: (url: string) => void;
   streamPlaying: boolean;
   setStreamPlaying: (playing: boolean) => void;
+  showOBSPreview: boolean;
+  setShowOBSPreview: (show: boolean) => void;
+  marqueePath: string;
+  setMarqueePath: (path: string) => void;
+  matchupCardPath: string;
+  setMatchupCardPath: (path: string) => void;
 } | null>(null);
 
 export function TournamentMarqueeProvider({ children }: { children: ReactNode }) {
   const [streamUrl, setStreamUrl] = useState("");
   const [streamPlaying, setStreamPlaying] = useState(false);
+  const [showOBSPreview, setShowOBSPreview] = useState(false);
+  const [marqueePath, setMarqueePath] = useState("");
+  const [matchupCardPath, setMatchupCardPath] = useState("");
   const [marquee, setMarqueeState] = useState<MarqueeData>({
     eventName: "",
     standings: {},
@@ -67,7 +76,7 @@ export function TournamentMarqueeProvider({ children }: { children: ReactNode })
   }, []);
 
   return (
-    <MarqueeContext.Provider value={{ marquee, setMarquee, streamUrl, setStreamUrl, streamPlaying, setStreamPlaying }}>
+    <MarqueeContext.Provider value={{ marquee, setMarquee, streamUrl, setStreamUrl, streamPlaying, setStreamPlaying, showOBSPreview, setShowOBSPreview, marqueePath, setMarqueePath, matchupCardPath, setMatchupCardPath }}>
       {children}
     </MarqueeContext.Provider>
   );

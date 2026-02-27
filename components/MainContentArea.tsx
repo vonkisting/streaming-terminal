@@ -2,8 +2,6 @@
 
 import { useRef, useEffect, useState, useMemo } from "react";
 import { useMarquee } from "./TournamentMarqueeContext";
-import MarqueeBanner from "./MarqueeBanner";
-import MatchupCard from "./MatchupCard";
 
 function getYouTubeVideoId(value: string): string | null {
   if (!value) return null;
@@ -55,11 +53,123 @@ function ensureAutoplay(url: string): string {
 }
 
 export default function MainContentArea() {
-  const { streamUrl, streamPlaying } = useMarquee();
+  const { streamUrl, streamPlaying, showOBSPreview } = useMarquee();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const obsCameraRef = useRef<HTMLVideoElement>(null);
   const [videoError, setVideoError] = useState<string | null>(null);
+  const [obsCameraError, setObsCameraError] = useState<string | null>(null);
+  const [obsCameraStream, setObsCameraStream] = useState<MediaStream | null>(null);
   const trimmedUrl = streamUrl?.trim() ?? "";
   const showStream = Boolean(trimmedUrl) && streamPlaying;
+
+  // OBS Virtual Camera: request on button click; then show device picker so user can choose OBS Virtual Camera
+  const obsCameraStreamRef = useRef<MediaStream | null>(null);
+  const [obsCameraRequesting, setObsCameraRequesting] = useState(false);
+  const [videoDevices, setVideoDevices] = useState<{ deviceId: string; label: string }[]>([]);
+  const [selectedCameraId, setSelectedCameraId] = useState<string>("");
+
+  useEffect(() => {
+    if (!showOBSPreview && obsCameraStreamRef.current) {
+      obsCameraStreamRef.current.getTracks().forEach((t) => t.stop());
+      obsCameraStreamRef.current = null;
+      setObsCameraStream(null);
+      setObsCameraError(null);
+      setVideoDevices([]);
+      setSelectedCameraId("");
+    }
+  }, [showOBSPreview]);
+
+  const switchCamera = async (deviceId: string) => {
+    if (!navigator.mediaDevices?.getUserMedia || !deviceId) return;
+    setSelectedCameraId(deviceId);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { deviceId: { exact: deviceId } },
+        audio: false,
+      });
+      if (obsCameraStreamRef.current) obsCameraStreamRef.current.getTracks().forEach((t) => t.stop());
+      obsCameraStreamRef.current = stream;
+      setObsCameraStream(stream);
+      setObsCameraError(null);
+    } catch {
+      setObsCameraError("Could not switch to that camera.");
+    }
+  };
+
+  const requestOBSCamera = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setObsCameraError("Camera access is not supported in this browser.");
+      return;
+    }
+    if (typeof window !== "undefined" && !window.isSecureContext) {
+      setObsCameraError("Camera only works on HTTPS or localhost. Open this site at http://localhost:3000 (not 127.0.0.1 or an IP address) and try again.");
+      return;
+    }
+    setObsCameraError(null);
+    setObsCameraRequesting(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoInputs = devices
+        .filter((d) => d.kind === "videoinput")
+        .map((d) => ({ deviceId: d.deviceId, label: d.label || `Camera ${d.deviceId.slice(0, 8)}` }));
+      setVideoDevices(videoInputs);
+      const obsDevice = videoInputs.find(
+        (d) => d.label.toLowerCase().includes("obs") || d.label.toLowerCase().includes("virtual")
+      );
+      if (obsDevice && videoInputs.length > 1) {
+        const currentId = stream.getVideoTracks()[0]?.getSettings().deviceId;
+        if (currentId !== obsDevice.deviceId) {
+          stream.getTracks().forEach((t) => t.stop());
+          const obsStream = await navigator.mediaDevices.getUserMedia({
+            video: { deviceId: { exact: obsDevice.deviceId } },
+            audio: false,
+          });
+          if (obsCameraStreamRef.current) obsCameraStreamRef.current.getTracks().forEach((t) => t.stop());
+          obsCameraStreamRef.current = obsStream;
+          setObsCameraStream(obsStream);
+          setSelectedCameraId(obsDevice.deviceId);
+        } else {
+          if (obsCameraStreamRef.current) obsCameraStreamRef.current.getTracks().forEach((t) => t.stop());
+          obsCameraStreamRef.current = stream;
+          setObsCameraStream(stream);
+          setSelectedCameraId(stream.getVideoTracks()[0]?.getSettings().deviceId ?? videoInputs[0]?.deviceId ?? "");
+        }
+      } else {
+        if (obsCameraStreamRef.current) obsCameraStreamRef.current.getTracks().forEach((t) => t.stop());
+        obsCameraStreamRef.current = stream;
+        setObsCameraStream(stream);
+        setSelectedCameraId(stream.getVideoTracks()[0]?.getSettings().deviceId ?? videoInputs[0]?.deviceId ?? "");
+      }
+      setObsCameraError(null);
+    } catch (err) {
+      const name = err instanceof Error ? err.name : "";
+      const msg = err instanceof Error ? err.message : String(err);
+      if (name === "NotAllowedError" || msg.includes("Permission") || msg.includes("NotAllowed") || msg.includes("denied")) {
+        setObsCameraError(
+          "Camera was blocked. Try: (1) Open this site at http://localhost:3000 in the address bar (not 127.0.0.1). " +
+            "(2) Click the lock or info icon in the address bar → Site settings → Camera → set to Allow or Ask. " +
+            "(3) Or try in a private/incognito window and click the button again."
+        );
+      } else if (name === "NotFoundError") {
+        setObsCameraError("No camera found. Start OBS Virtual Camera (Tools in OBS) and try again.");
+      } else if (name === "NotReadableError") {
+        setObsCameraError(
+          "Camera is in use or not readable. Try: (1) Close other apps or tabs using the camera (Zoom, Teams, other browser tabs). " +
+            "(2) In OBS, stop Virtual Camera then start it again. (3) If you already see a Camera dropdown above, pick OBS Virtual Camera from it. (4) Reload this page and click the button once."
+        );
+      } else {
+        setObsCameraError(
+          `${name || "Error"}: Camera couldn’t open. Use http://localhost:3000, allow camera when the browser asks, then use the Camera dropdown to select OBS Virtual Camera.`
+        );
+      }
+      setObsCameraStream(null);
+      setVideoDevices([]);
+      setSelectedCameraId("");
+    } finally {
+      setObsCameraRequesting(false);
+    }
+  };
 
   const embedInfo = useMemo(() => {
     const fromCode = getEmbedUrlFromCode(trimmedUrl);
@@ -97,6 +207,13 @@ export default function MainContentArea() {
     }
   }, [showStream, trimmedUrl, isIframeStream]);
 
+  useEffect(() => {
+    const el = obsCameraRef.current;
+    if (!el || !obsCameraStream) return;
+    el.srcObject = obsCameraStream;
+    el.play().catch(() => {});
+  }, [obsCameraStream]);
+
   const handleVideoError = () => {
     const video = videoRef.current;
     const err = video?.error;
@@ -128,7 +245,56 @@ export default function MainContentArea() {
 
   return (
     <div className="flex-1 min-h-0 relative flex flex-col h-full overflow-hidden min-w-0">
-      {showStream && (
+      {/* Full-screen OBS Virtual Camera output */}
+      {showOBSPreview && (
+        <div className="absolute inset-0 w-full h-full overflow-hidden min-w-0 z-30 bg-black">
+          {obsCameraStream ? (
+            <>
+              {videoDevices.length > 1 && (
+                <div className="absolute top-3 left-3 right-3 z-40 flex justify-center">
+                  <label className="flex items-center gap-2 rounded-lg bg-black/70 px-3 py-2 border border-slate-600/50">
+                    <span className="text-xs text-slate-400 whitespace-nowrap">Camera:</span>
+                    <select
+                      value={selectedCameraId}
+                      onChange={(e) => switchCamera(e.target.value)}
+                      className="bg-slate-800 text-slate-200 text-sm rounded px-2 py-1 border border-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-500 min-w-[180px]"
+                    >
+                      {videoDevices.map((d) => (
+                        <option key={d.deviceId} value={d.deviceId}>
+                          {d.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              )}
+              <video
+                ref={obsCameraRef}
+                className="absolute inset-0 w-full h-full min-w-full min-h-full object-contain object-center"
+                autoPlay
+                muted
+                playsInline
+              />
+            </>
+          ) : (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 p-6">
+              <p className="text-slate-400 text-center max-w-lg">
+                {obsCameraError ||
+                  "Click the button below. If the browser asks for camera access, allow it (you can pick any camera). Once video appears, use the Camera dropdown at the top to switch to OBS Virtual Camera. Use http://localhost:3000 if you get no prompt."}
+              </p>
+              <button
+                type="button"
+                onClick={requestOBSCamera}
+                disabled={obsCameraRequesting}
+                className="px-5 py-2.5 rounded-lg font-medium bg-slate-600 hover:bg-slate-500 disabled:opacity-50 text-white transition-colors focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 focus:ring-offset-black"
+              >
+                {obsCameraRequesting ? "Opening camera…" : obsCameraError ? "Try again" : "Allow camera to show OBS output"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      {!showOBSPreview && showStream && (
         <div className="absolute inset-0 w-full h-full overflow-hidden min-w-0">
           {iframeSrc ? (
             <iframe
@@ -155,20 +321,11 @@ export default function MainContentArea() {
           )}
         </div>
       )}
-      {videoError && (
+      {videoError && !showOBSPreview && (
         <div className="absolute inset-x-0 top-4 z-20 mx-4 rounded-lg bg-red-900/90 px-4 py-2 text-sm text-red-100 shadow-lg">
           {videoError}
         </div>
       )}
-      <div className={`flex-1 min-h-0 flex flex-col overflow-hidden min-w-0 ${showStream ? "relative z-10" : ""}`}>
-        <div className="flex-1 min-h-0 overflow-auto min-w-0">
-          <MarqueeBanner />
-          <div className="flex-1 min-h-0" />
-        </div>
-        <div className="flex-shrink-0">
-          <MatchupCard />
-        </div>
-      </div>
     </div>
   );
 }

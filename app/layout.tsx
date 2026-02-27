@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { ConvexClientProvider } from "./providers";
-import Layout from "@/components/Layout";
 import OBSConnectionScripts from "@/components/OBSConnectionScripts";
+import { TournamentMarqueeProvider } from "@/components/TournamentMarqueeContext";
+import { OBS_CONNECTION_ENABLED } from "@/lib/featureFlags";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -20,9 +21,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <OBSConnectionScripts />
+        {OBS_CONNECTION_ENABLED && <OBSConnectionScripts />}
         <ConvexClientProvider>
-          <Layout />
+          <TournamentMarqueeProvider>
+            {children}
+          </TournamentMarqueeProvider>
         </ConvexClientProvider>
       </body>
     </html>
