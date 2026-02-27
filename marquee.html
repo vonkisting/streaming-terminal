@@ -10,8 +10,7 @@
   <style>
     * { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; padding: 0; background: transparent !important; }
-    body { display: flex; flex-direction: column; font-family: system-ui, sans-serif; visibility: hidden; }
-    body.ready { visibility: visible; }
+    body { display: flex; flex-direction: column; font-family: system-ui, sans-serif; }
     .marquee-inner { width: max-content; }
     @keyframes marquee { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
   </style>
@@ -31,7 +30,6 @@
     </div>
   </div>
   <script>
-(function(){ if (document.readyState === "complete") document.body.classList.add("ready"); else window.addEventListener("load", function(){ document.body.classList.add("ready"); }); })();
 async function checkForUpdate() {
     try {
         var url = window.location.href + (window.location.href.indexOf("?") >= 0 ? "&" : "?") + "_=" + Date.now();
