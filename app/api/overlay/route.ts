@@ -318,58 +318,11 @@ export async function POST(request: NextRequest) {
     const data = marquee as MarqueeData;
     // marquee.html contains only the marquee (no matchup card).
     const marqueeOnlyHtml = buildMarqueeOnlyHtml(data);
-    const matchupCardOnlyHtml = buildMatchupCardOnlyHtml(data);
     const publicDir = path.join(process.cwd(), "public");
     const filePath = path.join(publicDir, "marquee.html");
     const matchupCardPath = path.join(publicDir, "matchupcard.html");
-    await Promise.all([
-      writeFile(filePath, marqueeOnlyHtml, "utf-8"),
-      writeFile(matchupCardPath, matchupCardOnlyHtml, "utf-8"),
-    ]);
 
-    const ftpHost = process.env.FTP_HOST;
-    const ftpUser = process.env.FTP_USER;
-    const ftpPassword = process.env.FTP_PASSWORD;
-    const ftpRemoteDir = process.env.FTP_REMOTE_DIR ?? ".";
-
-    // When FTP is configured, build the server URL; GitHub upload can override with GitHub Pages URL.
-    const baseUrl = ftpHost ? (process.env.MARQUEE_PUBLIC_URL ?? `http://${ftpHost}`) : "";
-    const urlPath = process.env.MARQUEE_URL_PATH ?? "marquee.html";
-    let marqueeUrl: string | undefined =
-      baseUrl && urlPath
-        ? `${baseUrl.replace(/\/$/, "")}/${urlPath.replace(/^\//, "")}`
-        : undefined;
-
-    if (ftpHost && ftpUser && ftpPassword) {
-      const client = new FtpClient(60_000);
-      try {
-        await client.access({
-          host: ftpHost,
-          user: ftpUser,
-          password: ftpPassword,
-          secure: false,
-        });
-        const remotePath = ftpRemoteDir === "." ? "marquee.html" : path.join(ftpRemoteDir, "marquee.html").replace(/\\/g, "/");
-        await client.uploadFrom(filePath, remotePath);
-      } catch (ftpErr) {
-        console.error("FTP upload error:", ftpErr);
-        return NextResponse.json(
-          { ok: true, path: "/marquee.html", savedPath: filePath, marqueeUrl, ftpError: String(ftpErr) },
-          { status: 200 }
-        );
-      } finally {
-        client.close();
-      }
-    }
-
-    const responsePayload: Record<string, unknown> = {
-      ok: true,
-      path: "/marquee.html",
-      savedPath: filePath,
-      ...(marqueeUrl && { marqueeUrl }),
-    };
-
-    // Build matchup card HTML with inline ball images so client can inject via data: URL (no external load).
+    // Build matchup card with inline ball images so it works when served from FTP (no external image files).
     let matchupCardImageData: MatchupCardImageData | undefined;
     try {
       const [ball1Buf, ball15Buf] = await Promise.all([
@@ -384,6 +337,67 @@ export async function POST(request: NextRequest) {
       }
     } catch (_) {}
     const matchupCardOnlyHtmlWithImages = buildMatchupCardOnlyHtml(data, matchupCardImageData, true);
+
+    await Promise.all([
+      writeFile(filePath, marqueeOnlyHtml, "utf-8"),
+      writeFile(matchupCardPath, matchupCardOnlyHtmlWithImages, "utf-8"),
+    ]);
+
+    const ftpHost = process.env.FTP_HOST;
+    const ftpUser = process.env.FTP_USER;
+    const ftpPassword = process.env.FTP_PASSWORD;
+    const ftpRemoteDir = process.env.FTP_REMOTE_DIR ?? ".";
+
+    const baseUrl = (process.env.MARQUEE_PUBLIC_URL || (ftpHost ? `http://${ftpHost}` : "")).replace(/\/$/, "");
+    const matchupCardBaseUrl = (process.env.MATCHUPCARD_PUBLIC_URL || baseUrl).replace(/\/$/, "");
+    const urlPath = process.env.MARQUEE_URL_PATH ?? "marquee.html";
+    const matchupCardUrlPath = process.env.MATCHUPCARD_URL_PATH ?? "matchupcard.html";
+    let marqueeUrl: string | undefined =
+      baseUrl && urlPath ? `${baseUrl}/${urlPath.replace(/^\//, "")}` : undefined;
+    let matchupCardUrlFromFtp: string | undefined =
+      matchupCardBaseUrl && matchupCardUrlPath ? `${matchupCardBaseUrl}/${matchupCardUrlPath.replace(/^\//, "")}` : undefined;
+
+    if (ftpHost && ftpUser && ftpPassword) {
+      const client = new FtpClient(60_000);
+      try {
+        await client.access({
+          host: ftpHost,
+          user: ftpUser,
+          password: ftpPassword,
+          secure: false,
+        });
+        const remoteMarquee = ftpRemoteDir === "." ? "marquee.html" : path.join(ftpRemoteDir, "marquee.html").replace(/\\/g, "/");
+        const remoteMatchup = ftpRemoteDir === "." ? "matchupcard.html" : path.join(ftpRemoteDir, "matchupcard.html").replace(/\\/g, "/");
+        await client.uploadFrom(filePath, remoteMarquee);
+        await client.uploadFrom(matchupCardPath, remoteMatchup);
+      } catch (ftpErr) {
+        console.error("FTP upload error:", ftpErr);
+        return NextResponse.json(
+          { ok: true, path: "/marquee.html", savedPath: filePath, marqueeUrl, matchupCardUrl: matchupCardUrlFromFtp, ftpError: String(ftpErr) },
+          { status: 200 }
+        );
+      } finally {
+        client.close();
+      }
+    }
+
+    const responsePayload: Record<string, unknown> = {
+      ok: true,
+      path: "/marquee.html",
+      savedPath: filePath,
+      ...(marqueeUrl && { marqueeUrl }),
+      ...(matchupCardUrlFromFtp && { matchupCardUrl: matchupCardUrlFromFtp }),
+      ...(ftpHost &&
+        ftpUser &&
+        ftpPassword && {
+          _ftpDebug: {
+            remoteMarquee: ftpRemoteDir === "." ? "marquee.html" : path.join(ftpRemoteDir, "marquee.html").replace(/\\/g, "/"),
+            remoteMatchup: ftpRemoteDir === "." ? "matchupcard.html" : path.join(ftpRemoteDir, "matchupcard.html").replace(/\\/g, "/"),
+            matchupCardUrlReturned: matchupCardUrlFromFtp ?? null,
+          },
+        }),
+    };
+
     responsePayload.matchupCardHtml = matchupCardOnlyHtmlWithImages;
 
     // Store HTML so GET /api/overlay/marquee and /api/overlay/matchup-card can serve it (no GitHub needed).
@@ -398,8 +412,8 @@ export async function POST(request: NextRequest) {
       } catch (_) {}
     }
     if (overlayBase) {
-      responsePayload.marqueeUrl = `${overlayBase}/api/overlay/marquee`;
-      responsePayload.matchupCardUrl = `${overlayBase}/api/overlay/matchup-card`;
+      if (!responsePayload.marqueeUrl) responsePayload.marqueeUrl = `${overlayBase}/api/overlay/marquee`;
+      if (!responsePayload.matchupCardUrl) responsePayload.matchupCardUrl = `${overlayBase}/api/overlay/matchup-card`;
     }
 
     // Upload to GitHub only when app-hosted URLs are not used (fallback; can cause 404 delay).

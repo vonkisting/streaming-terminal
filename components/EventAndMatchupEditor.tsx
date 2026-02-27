@@ -296,33 +296,19 @@ export default function EventAndMatchupEditor() {
         if (data?.githubUploadedAt) setLastMarqueeUploadAt(data.githubUploadedAt);
         if (data?.ok && typeof window !== "undefined") {
           const win = window as unknown as { obsRequest?: (type: string, data?: Record<string, unknown>) => Promise<unknown>; isOBSConnected?: () => boolean; reloadBrowserSource?: (name: string) => Promise<void> };
-          if (win.obsRequest && win.isOBSConnected?.()) {
-            const origin = typeof window !== "undefined" ? window.location.origin : "";
-            const obsBaseUrl = (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_OBS_BASE_URL) || (origin.includes("localhost") ? origin.replace(/localhost/i, "127.0.0.1") : origin);
-            const base = (pathToShow || "").trim();
-            const useLocalMarqueeRoute = !base.startsWith("http");
-            const cacheBust = `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+          const base = ((typeof process !== "undefined" && process.env?.NEXT_PUBLIC_STREAM_OVERLAY_BASE_URL) || "http://stream.poolhub.us").replace(/\/$/, "");
+          const cacheBust = `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+          const marqueeUrlForObs = `${base}/marquee.html?v=${encodeURIComponent(cacheBust)}`;
+          const matchupCardUrlForObs = `${base}/matchupcard.html?v=${encodeURIComponent(cacheBust)}`;
 
-            if (marqueeKey !== lastMarqueeKeyRef.current && marqueeEnabled) {
-              lastMarqueeKeyRef.current = marqueeKey;
-              const fullUrl = useLocalMarqueeRoute
-                ? `${obsBaseUrl}/marquee/${encodeURIComponent(cacheBust)}`
-                : base.startsWith("http")
-                  ? base
-                  : obsBaseUrl + (base.startsWith("/") ? base : "/" + base);
-              const cacheBustedUrl = useLocalMarqueeRoute ? fullUrl : fullUrl + (fullUrl.includes("?") ? "&" : "?") + "v=" + encodeURIComponent(cacheBust) + "&t=" + Date.now();
-              win.obsRequest("SetInputSettings", { inputName: "Marquee", inputSettings: { url: cacheBustedUrl } })
-                .then(() => setTimeout(() => win.reloadBrowserSource?.("Marquee")?.catch(() => {}), 300))
-                .catch(() => {});
-            }
-
-            if (matchupKey !== lastMatchupKeyRef.current) {
-              lastMatchupKeyRef.current = matchupKey;
-              const matchupBase = (data?.matchupCardUrl ?? "").trim();
-              const useLocalMatchupRoute = !matchupBase.startsWith("http");
-              const matchupCardUrl = useLocalMatchupRoute
-                ? `${obsBaseUrl}/matchupcard/${encodeURIComponent(cacheBust)}`
-                : matchupBase;
+          const sendUrlsToOBS = () => {
+            if (!win.obsRequest) return false;
+            try {
+              if (marqueeEnabled) {
+                win.obsRequest("SetInputSettings", { inputName: "Marquee", inputSettings: { url: marqueeUrlForObs } })
+                  .then(() => setTimeout(() => win.reloadBrowserSource?.("Marquee")?.catch(() => {}), 300))
+                  .catch(() => {});
+              }
               (async () => {
                 try {
                   const sceneData = (await win.obsRequest!("GetCurrentProgramScene", {})) as { currentProgramSceneName?: string };
@@ -336,7 +322,7 @@ export default function EventAndMatchupEditor() {
                         sceneName,
                         inputName: "Matchup Card",
                         inputKind: "browser_source",
-                        inputSettings: { url: matchupCardUrl, width: 1920, height: 1080 },
+                        inputSettings: { url: matchupCardUrlForObs, width: 1920, height: 1080 },
                       });
                     } catch (createErr) {
                       const errMsg = String(createErr ?? "");
@@ -350,16 +336,25 @@ export default function EventAndMatchupEditor() {
                   if (matchupItem != null) {
                     await win.obsRequest!("SetSceneItemEnabled", { sceneName, sceneItemId: matchupItem.sceneItemId, sceneItemEnabled: true });
                   }
-                  await win.obsRequest!("SetInputSettings", { inputName: "Matchup Card", inputSettings: { url: matchupCardUrl } });
-                  const reloadMatchup = () => win.reloadBrowserSource?.("Matchup Card")?.catch(() => {});
-                  setTimeout(reloadMatchup, 300);
-                  if (useLocalMatchupRoute === false) {
-                    setTimeout(reloadMatchup, 3000);
-                    setTimeout(reloadMatchup, 8000);
-                  }
+                  await win.obsRequest!("SetInputSettings", { inputName: "Matchup Card", inputSettings: { url: matchupCardUrlForObs } });
+                  await new Promise((r) => setTimeout(r, 100));
+                  await win.obsRequest!("SetInputSettings", { inputName: "Matchup Card", inputSettings: { url: matchupCardUrlForObs } });
+                  setTimeout(() => win.reloadBrowserSource?.("Matchup Card")?.catch(() => {}), 300);
                 } catch (_) {}
               })();
+              return true;
+            } catch {
+              return false;
             }
+          };
+
+          if (win.isOBSConnected?.()) {
+            sendUrlsToOBS();
+          } else {
+            setTimeout(() => {
+              sendUrlsToOBS();
+            }, 150);
+            setTimeout(() => sendUrlsToOBS(), 1000);
           }
         }
       })
