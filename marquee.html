@@ -10,7 +10,8 @@
   <style>
     * { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; padding: 0; background: transparent !important; }
-    body { display: flex; flex-direction: column; font-family: system-ui, sans-serif; }
+    body { display: flex; flex-direction: column; font-family: system-ui, sans-serif; visibility: hidden; }
+    body.ready { visibility: visible; }
     .marquee-inner { width: max-content; }
     @keyframes marquee { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
   </style>
@@ -21,15 +22,16 @@
     <div style="width:100%;overflow:hidden;border-bottom:1px solid rgba(51,65,85,0.5);background:linear-gradient(to bottom,#1e3a8a,#1e40af,#1e3a8a);">
       <div class="marquee-inner" style="display:inline-flex;align-items:center;white-space:nowrap;padding:9px 16px;animation:marquee 20.6s linear infinite;">
         <span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">53rd Annual Yogi Open - </span><span style="display:inline-block;width:100px;"></span>
-        <span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">16th - Tim Raflik</span><span style="display:inline-block;width:75px;"></span><span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">15th - Steve Olsen</span><span style="display:inline-block;width:75px;"></span><span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">14th - PJ Whitney</span><span style="display:inline-block;width:75px;"></span><span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">13th - Kevin Johnson</span><span style="display:inline-block;width:75px;"></span><span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">11th - Kevin Kisting</span><span style="display:inline-block;width:75px;"></span>
+        <span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">16th - Tim Raflik</span><span style="display:inline-block;width:75px;"></span><span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">15th - Steve Olsen</span><span style="display:inline-block;width:75px;"></span><span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">14th - PJ Whitney</span><span style="display:inline-block;width:75px;"></span><span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">13th - Kevin Johnson</span><span style="display:inline-block;width:75px;"></span><span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">12th - Chip Kedrowicz</span><span style="display:inline-block;width:75px;"></span><span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">11th - Kevin Kisting</span><span style="display:inline-block;width:75px;"></span>
         <span style="display:inline-block;width:300px;"></span>
         <span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">53rd Annual Yogi Open - </span><span style="display:inline-block;width:100px;"></span>
-        <span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">16th - Tim Raflik</span><span style="display:inline-block;width:75px;"></span><span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">15th - Steve Olsen</span><span style="display:inline-block;width:75px;"></span><span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">14th - PJ Whitney</span><span style="display:inline-block;width:75px;"></span><span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">13th - Kevin Johnson</span><span style="display:inline-block;width:75px;"></span><span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">11th - Kevin Kisting</span><span style="display:inline-block;width:75px;"></span>
+        <span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">16th - Tim Raflik</span><span style="display:inline-block;width:75px;"></span><span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">15th - Steve Olsen</span><span style="display:inline-block;width:75px;"></span><span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">14th - PJ Whitney</span><span style="display:inline-block;width:75px;"></span><span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">13th - Kevin Johnson</span><span style="display:inline-block;width:75px;"></span><span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">12th - Chip Kedrowicz</span><span style="display:inline-block;width:75px;"></span><span style="font-size:22px;color:#e2e8f0;font-weight:500;flex-shrink:0;">11th - Kevin Kisting</span><span style="display:inline-block;width:75px;"></span>
         <span style="display:inline-block;width:300px;"></span>
       </div>
     </div>
   </div>
   <script>
+(function(){ if (document.readyState === "complete") document.body.classList.add("ready"); else window.addEventListener("load", function(){ document.body.classList.add("ready"); }); })();
 async function checkForUpdate() {
     try {
         var url = window.location.href + (window.location.href.indexOf("?") >= 0 ? "&" : "?") + "_=" + Date.now();
