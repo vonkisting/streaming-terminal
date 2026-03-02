@@ -43,9 +43,10 @@ export default function MatchupCard() {
   const { marquee } = useMarquee();
   const whoseTurn = marquee.matchupWhoseTurn ?? 1;
   const suitsSwapped = marquee.suitsImagesSwapped ?? false;
-  const firstBallSrc = suitsSwapped ? "/pool-ball-15.png" : "/pool-ball-1.png";
+  const base = typeof window !== "undefined" ? `${window.location.origin}${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}` : "";
+  const firstBallSrc = `${base}/pool-ball-${suitsSwapped ? "15" : "1"}.png`;
   const firstBallAlt = suitsSwapped ? "15 ball" : "1 ball";
-  const secondBallSrc = suitsSwapped ? "/pool-ball-1.png" : "/pool-ball-15.png";
+  const secondBallSrc = `${base}/pool-ball-${suitsSwapped ? "1" : "15"}.png`;
   const secondBallAlt = suitsSwapped ? "1 ball" : "15 ball";
 
   if (!marquee.eventName.trim()) return null;

@@ -59,7 +59,7 @@ function buildOverlayHtml(m: MarqueeData): string {
 
   const ordered = Object.entries(m.standings || {})
     .filter(([, idx]) => idx !== undefined)
-    .sort(([a], [b]) => Number(a) - Number(b))
+    .sort(([a], [b]) => Number(b) - Number(a))
     .map(([pos, playerIndex]) => {
       const name = m.playerNames[Number(playerIndex)] || `Player ${Number(playerIndex) + 1}`;
       return `${positionLabel(Number(pos))} - ${name}`;
@@ -296,7 +296,7 @@ function updateMatchupCard(html) {
 function buildMarqueeText(m: MarqueeData): string {
   const ordered = Object.entries(m.standings || {})
     .filter(([, idx]) => idx !== undefined)
-    .sort(([a], [b]) => Number(a) - Number(b))
+    .sort(([a], [b]) => Number(b) - Number(a))
     .map(([pos, playerIndex]) => {
       const name = m.playerNames[Number(playerIndex)] || `Player ${Number(playerIndex) + 1}`;
       return `${positionLabel(Number(pos))} - ${name}`;
@@ -310,7 +310,7 @@ function buildMarqueeText(m: MarqueeData): string {
 export function buildMarqueeOnlyHtml(m: MarqueeData, overlayWsUrl?: string): { fullHtml: string; marqueeInnerHtml: string } {
   const ordered = Object.entries(m.standings || {})
     .filter(([, idx]) => idx !== undefined)
-    .sort(([a], [b]) => Number(a) - Number(b))
+    .sort(([a], [b]) => Number(b) - Number(a))
     .map(([pos, playerIndex]) => {
       const name = m.playerNames[Number(playerIndex)] || `Player ${Number(playerIndex) + 1}`;
       return `${positionLabel(Number(pos))} - ${name}`;

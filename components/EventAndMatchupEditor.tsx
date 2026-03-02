@@ -118,6 +118,8 @@ export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow
   const [lastMarqueeUploadAt, setLastMarqueeUploadAt] = useState<string | null>(null);
   const [showCopyNotification, setShowCopyNotification] = useState(false);
   const copyNotificationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [saveMarqueeNotification, setSaveMarqueeNotification] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const saveMarqueeNotificationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastMarqueeKeyRef = useRef<string>("");
   const lastMatchupKeyRef = useRef<string>("");
   const [turnFontSize, setTurnFontSize] = useState(14);
@@ -126,6 +128,12 @@ export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow
   const eventDropdownAnchorRef = useRef<HTMLDivElement>(null);
   const [dropdownRect, setDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   useEffect(() => setSavedEvents(getStoredData()), []);
+
+  useEffect(() => {
+    return () => {
+      if (saveMarqueeNotificationTimeoutRef.current) clearTimeout(saveMarqueeNotificationTimeoutRef.current);
+    };
+  }, []);
 
   const updateDropdownRect = useCallback(() => {
     const el = eventDropdownAnchorRef.current;
@@ -339,7 +347,35 @@ export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ marquee: marqueePayload }),
-    }).catch(() => {});
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (saveMarqueeNotificationTimeoutRef.current) clearTimeout(saveMarqueeNotificationTimeoutRef.current);
+        if (data?.ok) {
+          setSaveMarqueeNotification({ type: "success", message: "Marquee saved to C:\\OBS Overlays\\Marquee.Html" });
+          setMarqueePath("C:\\OBS Overlays\\Marquee.Html");
+          const win = typeof window !== "undefined" ? window : null;
+          const obsRequest = win?.obsRequest as ((type: string, data?: Record<string, unknown>) => Promise<unknown>) | undefined;
+          if (obsRequest && win?.isOBSConnected?.()) {
+            const fileUrlWithCache = `file:///C:/OBS%20Overlays/Marquee.Html?t=${Date.now()}`;
+            obsRequest("SetInputSettings", { inputName: "Marquee", inputSettings: { url: fileUrlWithCache } }).catch(() => {});
+          }
+        } else {
+          setSaveMarqueeNotification({ type: "error", message: data?.error ?? "Failed to save marquee file" });
+        }
+        saveMarqueeNotificationTimeoutRef.current = setTimeout(() => {
+          setSaveMarqueeNotification(null);
+          saveMarqueeNotificationTimeoutRef.current = null;
+        }, 4000);
+      })
+      .catch(() => {
+        if (saveMarqueeNotificationTimeoutRef.current) clearTimeout(saveMarqueeNotificationTimeoutRef.current);
+        setSaveMarqueeNotification({ type: "error", message: "Failed to save marquee file" });
+        saveMarqueeNotificationTimeoutRef.current = setTimeout(() => {
+          setSaveMarqueeNotification(null);
+          saveMarqueeNotificationTimeoutRef.current = null;
+        }, 4000);
+      });
   }, [
     eventName, standings, playerNames, marqueeEnabled, marqueeSpeed,
     currentMatchupPlayer1, currentMatchupPlayer2, showMatchupScore, showMatchupRace,
@@ -787,11 +823,11 @@ export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow
                   <div className="flex flex-1 min-w-0 max-w-sm flex flex-col gap-2">
                     <div className="flex rounded-lg overflow-hidden border border-slate-600 bg-slate-900/80">
                       <button type="button" onClick={() => setMatchupSuit(1)} className="flex-1 flex items-center justify-center py-2" aria-pressed={matchupSuit === 1}>
-                        <img src={suitsImagesSwapped ? "/pool-ball-15.png" : "/pool-ball-1.png"} alt="1" className="w-8 h-8 object-contain" />
+                        <img src={typeof window !== "undefined" ? `${window.location.origin}${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/pool-ball-${suitsImagesSwapped ? "15" : "1"}.png` : "/pool-ball-1.png"} alt="1" className="w-8 h-8 object-contain" />
                       </button>
                       <div className="w-px flex-shrink-0 bg-slate-600 self-stretch min-h-[2rem]" aria-hidden />
                       <button type="button" onClick={() => setMatchupSuit(2)} className="flex-1 flex items-center justify-center py-2" aria-pressed={matchupSuit === 2}>
-                        <img src={suitsImagesSwapped ? "/pool-ball-1.png" : "/pool-ball-15.png"} alt="15" className="w-8 h-8 object-contain" />
+                        <img src={typeof window !== "undefined" ? `${window.location.origin}${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/pool-ball-${suitsImagesSwapped ? "1" : "15"}.png` : "/pool-ball-15.png"} alt="15" className="w-8 h-8 object-contain" />
                       </button>
                     </div>
                     <button type="button" onClick={() => setSuitsImagesSwapped((s) => !s)} className="w-full py-2 text-sm font-medium rounded-lg bg-slate-700/80 text-slate-200 hover:bg-slate-600/80">Toggle Suits</button>
@@ -866,6 +902,20 @@ export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow
       {showCopyNotification && (
         <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
           <div className="bg-slate-800 border border-slate-600 rounded-xl px-6 py-4 shadow-xl text-slate-200 text-sm">Path copied to clipboard</div>
+        </div>
+      )}
+
+      {saveMarqueeNotification && (
+        <div
+          className={`fixed top-3 left-1/2 z-50 -translate-x-1/2 rounded-lg border px-4 py-2.5 shadow-lg max-w-lg text-center ${
+            saveMarqueeNotification.type === "success"
+              ? "border-emerald-500/60 bg-emerald-950/95 text-emerald-200"
+              : "border-red-500/60 bg-red-950/95 text-red-200"
+          }`}
+          role="status"
+          aria-live="polite"
+        >
+          <span className="text-sm font-medium">{saveMarqueeNotification.message}</span>
         </div>
       )}
 
