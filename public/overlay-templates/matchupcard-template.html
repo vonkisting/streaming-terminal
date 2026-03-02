@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920, height=1080">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>Matchup Card</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; width: 1920px; height: 1080px; background: rgba(0,0,0,0.01); display: flex; align-items: center; justify-content: center; font-family: system-ui, sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="matchup-container">
+    <!-- Content updated via updateMatchupCard(html) over WebSocket -->
+  </div>
+  <script>
+// Template for OBS browser source. Set WS_URL to your relay (e.g. ws://192.168.1.3:4455). App sends { type: "matchup", html: "...", suitsSwapped, whoseTurn }.
+function updateMatchupCard(html) {
+  var el = document.getElementById("matchup-container");
+  if (el && typeof html === "string") el.innerHTML = html;
+}
+(function(){
+  var WS_URL = "ws://YOUR_RELAY_HOST:4455";
+  function connect() {
+    try {
+      var ws = new WebSocket(WS_URL);
+      ws.onmessage = function(e) {
+        try {
+          var msg = JSON.parse(e.data);
+          if (msg.type === "matchup" && typeof msg.html === "string") updateMatchupCard(msg.html);
+        } catch (err) {}
+      };
+      ws.onclose = function() { setTimeout(connect, 2000); };
+    } catch (err) { setTimeout(connect, 2000); }
+  }
+  connect();
+})();
+  </script>
+</body>
+</html>

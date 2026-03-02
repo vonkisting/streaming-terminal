@@ -1,0 +1,13 @@
+{
+  "name": "overlay-ws-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WebSocket relay for OBS marquee/matchup overlay updates",
+  "main": "relay.js",
+  "scripts": {
+    "start": "node relay.js"
+  },
+  "dependencies": {
+    "ws": "^8.19.0"
+  }
+}

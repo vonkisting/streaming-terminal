@@ -17,11 +17,58 @@ import {
   Settings2,
   ChevronDown,
   ChevronRight,
+  Volume2,
+  Upload,
+  Play,
+  Trash2,
 } from "lucide-react";
 import EventAndMatchupEditor from "./EventAndMatchupEditor";
 import ResizablePanel from "./ResizablePanel";
 
-const DEFAULT_WS_URL = "ws://localhost:4455";
+const WS_URL_OPTIONS = [
+  "ws://192.168.0.63:4455",
+  "ws://100.109.136.115:4455",
+  "ws://localhost:4455",
+] as const;
+const WS_URL_CUSTOM = "__custom__";
+const OBS_WS_URL_STORAGE_KEY = "streaming-terminal-obs-ws-url";
+const CUSTOM_WS_URLS_STORAGE_KEY = "streaming-terminal-custom-ws-urls";
+const MAX_SAVED_CUSTOM_URLS = 20;
+const OBS_WS_PASSWORD_STORAGE_KEY = "streaming-terminal-obs-ws-password";
+
+function loadLastObsWsUrl(): string {
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem(OBS_WS_URL_STORAGE_KEY) ?? "";
+}
+function loadLastObsWsPassword(): string {
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem(OBS_WS_PASSWORD_STORAGE_KEY) ?? "";
+}
+function loadSavedCustomWsUrls(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(CUSTOM_WS_URLS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((u): u is string => typeof u === "string" && (u.startsWith("ws://") || u.startsWith("wss://"))).slice(0, MAX_SAVED_CUSTOM_URLS);
+  } catch {
+    return [];
+  }
+}
+
+function saveCustomWsUrl(url: string): void {
+  const trimmed = url.trim();
+  if (!trimmed || (!trimmed.startsWith("ws://") && !trimmed.startsWith("wss://"))) return;
+  const current = loadSavedCustomWsUrls();
+  const without = current.filter((u) => u !== trimmed);
+  const next = [trimmed, ...without].slice(0, MAX_SAVED_CUSTOM_URLS);
+  try {
+    localStorage.setItem(CUSTOM_WS_URLS_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // ignore
+  }
+}
 
 declare global {
   interface Window {
@@ -40,6 +87,78 @@ type RecordState = "recording" | "stopped" | "unknown";
 interface SceneItem {
   sceneName: string;
   sceneIndex: number;
+}
+
+interface SoundEffectItem {
+  id: string;
+  name: string;
+  file: File;
+  publicUrl?: string;
+}
+
+const AUDIO_ACCEPT = "audio/*";
+const SOUND_EFFECTS_VLC_SOURCE_NAME = "Sound Effects VLC Source";
+const SOUND_EFFECTS_DB_NAME = "streaming-terminal-sound-effects";
+const SOUND_EFFECTS_STORE = "sound-effects";
+
+function openSoundEffectsDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(SOUND_EFFECTS_DB_NAME, 1);
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => resolve(req.result);
+    req.onupgradeneeded = (e) => {
+      const db = (e.target as IDBOpenDBRequest).result;
+      if (!db.objectStoreNames.contains(SOUND_EFFECTS_STORE)) {
+        db.createObjectStore(SOUND_EFFECTS_STORE, { keyPath: "id" });
+      }
+    };
+  });
+}
+
+function loadSoundEffectsFromDb(): Promise<SoundEffectItem[]> {
+  return openSoundEffectsDb().then((db) => {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(SOUND_EFFECTS_STORE, "readonly");
+      const store = tx.objectStore(SOUND_EFFECTS_STORE);
+      const req = store.getAll();
+      req.onerror = () => { db.close(); reject(req.error); };
+      req.onsuccess = () => {
+        db.close();
+        const rows = (req.result as { id: string; name: string; file: Blob; publicUrl?: string }[]) ?? [];
+        const items: SoundEffectItem[] = rows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          file: new File([r.file], r.name, { type: r.file.type }),
+          ...(r.publicUrl != null && { publicUrl: r.publicUrl }),
+        }));
+        resolve(items);
+      };
+    });
+  });
+}
+
+function saveSoundEffectToDb(item: SoundEffectItem): Promise<void> {
+  return openSoundEffectsDb().then((db) => {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(SOUND_EFFECTS_STORE, "readwrite");
+      const store = tx.objectStore(SOUND_EFFECTS_STORE);
+      store.put({ id: item.id, name: item.name, file: item.file, ...(item.publicUrl != null && { publicUrl: item.publicUrl }) });
+      tx.onerror = () => { db.close(); reject(tx.error); };
+      tx.oncomplete = () => { db.close(); resolve(); };
+    });
+  });
+}
+
+function deleteSoundEffectFromDb(id: string): Promise<void> {
+  return openSoundEffectsDb().then((db) => {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(SOUND_EFFECTS_STORE, "readwrite");
+      const store = tx.objectStore(SOUND_EFFECTS_STORE);
+      store.delete(id);
+      tx.onerror = () => { db.close(); reject(tx.error); };
+      tx.oncomplete = () => { db.close(); resolve(); };
+    });
+  });
 }
 
 interface SceneListResponse {
@@ -139,8 +258,9 @@ function resolveOverlaps(layout: LayoutState, changedId: string): LayoutState {
 
 export default function OBSDashboard() {
   const [scriptReady, setScriptReady] = useState(false);
-  const [url, setUrl] = useState(DEFAULT_WS_URL);
-  const [password, setPassword] = useState("");
+  const [url, setUrl] = useState(loadLastObsWsUrl);
+  const [password, setPassword] = useState(loadLastObsWsPassword);
+  const [savedCustomUrls, setSavedCustomUrls] = useState<string[]>(loadSavedCustomWsUrls);
   const [status, setStatus] = useState<ConnectionStatus>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [scenes, setScenes] = useState<SceneItem[]>([]);
@@ -149,14 +269,28 @@ export default function OBSDashboard() {
   const [streamTimecode, setStreamTimecode] = useState<string>("");
   const [recordState, setRecordState] = useState<RecordState>("unknown");
   const [recordTimecode, setRecordTimecode] = useState<string>("");
+  const [streamExpanded, setStreamExpanded] = useState(true);
+  const [recordingExpanded, setRecordingExpanded] = useState(true);
+  const [scenesExpanded, setScenesExpanded] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [connectionExpanded, setConnectionExpanded] = useState(true);
+  const [settingsCardExpanded, setSettingsCardExpanded] = useState(true);
+  const [soundEffectsCardExpanded, setSoundEffectsCardExpanded] = useState(false);
   const [layout, setLayout] = useState<LayoutState>(() => loadLayout());
   const [dragState, setDragState] = useState<{ id: string; startX: number; startY: number; startLeft: number; startTop: number } | null>(null);
   const [resizeState, setResizeState] = useState<{ id: string; startX: number; startY: number; startW: number; startH: number } | null>(null);
   const mainRef = useRef<HTMLElement>(null);
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
+  const [soundFiles, setSoundFiles] = useState<SoundEffectItem[]>([]);
+  const [soundDropActive, setSoundDropActive] = useState(false);
+  const soundFileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    loadSoundEffectsFromDb()
+      .then((items) => setSoundFiles(items))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const el = mainRef.current;
@@ -170,13 +304,6 @@ export default function OBSDashboard() {
     setContainerSize({ w: Math.floor(rect.width), h: Math.floor(rect.height) });
     return () => ro.disconnect();
   }, []);
-
-  const envUrl = typeof process !== "undefined" ? process.env.NEXT_PUBLIC_OBS_WS_URL : undefined;
-  const envPassword = typeof process !== "undefined" ? process.env.NEXT_PUBLIC_OBS_WS_PASSWORD : undefined;
-
-  useEffect(() => {
-    if (envUrl) setUrl(envUrl);
-  }, [envUrl]);
 
   useEffect(() => {
     try {
@@ -257,14 +384,24 @@ export default function OBSDashboard() {
   }, [scriptReady]);
 
   const connect = useCallback(() => {
-    if (!scriptReady || !window.connectOBS) return;
+    const connectUrl = url.trim();
+    if (!scriptReady || !window.connectOBS || !connectUrl) return;
     setErrorMessage(null);
     setStatus("connecting");
-    const connectUrl = (url.trim() || envUrl || DEFAULT_WS_URL).trim();
-    const connectPassword = password || envPassword || "";
+    const connectPassword = password.trim();
+    try {
+      localStorage.setItem(OBS_WS_URL_STORAGE_KEY, connectUrl);
+      localStorage.setItem(OBS_WS_PASSWORD_STORAGE_KEY, connectPassword);
+      if (!WS_URL_OPTIONS.includes(connectUrl as (typeof WS_URL_OPTIONS)[number])) {
+        saveCustomWsUrl(connectUrl);
+        setSavedCustomUrls(loadSavedCustomWsUrls());
+      }
+    } catch {
+      // ignore
+    }
     window.__OBS_WS_CONFIG__ = { url: connectUrl, password: connectPassword };
     window.connectOBS();
-  }, [scriptReady, url, password, envUrl, envPassword]);
+  }, [scriptReady, url, password]);
 
   const disconnect = useCallback(() => {
     if (window.disconnectOBS) window.disconnectOBS();
@@ -273,6 +410,138 @@ export default function OBSDashboard() {
     setCurrentScene(null);
     setStreamState("unknown");
     setRecordState("unknown");
+  }, []);
+
+  const addSoundFiles = useCallback((files: FileList | File[]) => {
+    const list = Array.from(files);
+    const audio = list.filter((f) => f.type.startsWith("audio/"));
+    if (audio.length === 0) return;
+    const newItems: SoundEffectItem[] = audio.map((file) => ({
+      id: `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      name: file.name,
+      file,
+    }));
+    setSoundFiles((prev) => [...prev, ...newItems]);
+    newItems.forEach((item) => {
+      saveSoundEffectToDb(item).catch(() => {});
+      const form = new FormData();
+      form.set("file", item.file);
+      fetch("/api/sound-effect", { method: "POST", body: form })
+        .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Upload failed"))))
+        .then((data: { publicUrl?: string }) => {
+          if (data.publicUrl) {
+            setSoundFiles((prev) =>
+              prev.map((i) => (i.id === item.id ? { ...i, publicUrl: data.publicUrl } : i))
+            );
+            saveSoundEffectToDb({ ...item, publicUrl: data.publicUrl }).catch(() => {});
+          }
+        })
+        .catch(() => {});
+    });
+  }, []);
+
+  const removeSoundFile = useCallback((id: string) => {
+    setSoundFiles((prev) => prev.filter((f) => f.id !== id));
+    deleteSoundEffectFromDb(id).catch(() => {});
+  }, []);
+
+  const playSoundInOBS = useCallback(async (item: SoundEffectItem) => {
+    if (!window.obsRequest || !window.isOBSConnected?.()) {
+      setErrorMessage("Connect to OBS first to play sound effects.");
+      return;
+    }
+    setActionLoading(`sound-${item.id}`);
+    setErrorMessage(null);
+    try {
+      let fileSource: string;
+      if (item.publicUrl) {
+        fileSource = item.publicUrl;
+      } else {
+        const form = new FormData();
+        form.set("file", item.file);
+        const uploadRes = await fetch("/api/sound-effect", { method: "POST", body: form });
+        if (!uploadRes.ok) {
+          const err = await uploadRes.json().catch(() => ({}));
+          throw new Error(err?.error ?? "Upload failed");
+        }
+        const data = (await uploadRes.json()) as { id: string; url: string; localPath?: string; publicUrl?: string };
+        fileSource = data.publicUrl ?? data.localPath ?? data.url;
+      }
+
+      const sceneData = (await window.obsRequest!("GetCurrentProgramScene", {})) as { currentProgramSceneName?: string };
+      const sceneName = sceneData?.currentProgramSceneName;
+      if (!sceneName) {
+        throw new Error("No active scene in OBS. Switch to a scene first.");
+      }
+
+      try {
+        await window.obsRequest!("CreateInput", {
+          sceneName,
+          inputName: SOUND_EFFECTS_VLC_SOURCE_NAME,
+          inputKind: "vlc_source",
+          inputSettings: { playlist: [], loop: false },
+          sceneItemEnabled: true,
+        });
+      } catch (createErr) {
+        const msg = createErr instanceof Error ? createErr.message : String(createErr);
+        if (!/already exists|duplicate|resource/i.test(msg)) {
+          throw createErr;
+        }
+      }
+
+      try {
+        await window.obsRequest!("SetInputAudioMonitorType", {
+          inputName: SOUND_EFFECTS_VLC_SOURCE_NAME,
+          monitorType: "OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT",
+        });
+      } catch {
+        // ignore if unsupported
+      }
+
+      await window.obsRequest!("SetInputSettings", {
+        inputName: SOUND_EFFECTS_VLC_SOURCE_NAME,
+        inputSettings: {
+          playlist: [{ value: fileSource, hidden: false, selected: true }],
+          loop: false,
+        },
+        overlay: false,
+      });
+
+      await new Promise((r) => setTimeout(r, 300));
+
+      await window.obsRequest!("TriggerMediaInputAction", {
+        inputName: SOUND_EFFECTS_VLC_SOURCE_NAME,
+        mediaAction: "OBS_MEDIA_INPUT_ACTION_RESTART",
+      });
+
+      const endStates = ["OBS_MEDIA_STATE_ENDED", "OBS_MEDIA_STATE_STOPPED", "OBS_MEDIA_STATE_ERROR", "OBS_MEDIA_STATE_NONE"];
+      for (let i = 0; i < 600; i++) {
+        await new Promise((r) => setTimeout(r, 250));
+        try {
+          const status = (await window.obsRequest!("GetMediaInputStatus", { inputName: SOUND_EFFECTS_VLC_SOURCE_NAME })) as { mediaState?: string };
+          if (status?.mediaState && endStates.includes(status.mediaState)) break;
+        } catch {
+          break;
+        }
+      }
+
+      try {
+        const listData = (await window.obsRequest!("GetSceneItemList", { sceneName })) as { sceneItems?: { sceneItemId: number; sourceName?: string }[] };
+        const vlcItem = listData?.sceneItems?.find((i) => i.sourceName === SOUND_EFFECTS_VLC_SOURCE_NAME);
+        if (vlcItem != null) {
+          await window.obsRequest!("RemoveSceneItem", { sceneName, sceneItemId: vlcItem.sceneItemId });
+        }
+      } catch {
+        // ignore
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg && !msg.includes("invalid media input action")) {
+        setErrorMessage(msg || "Sound effect failed.");
+      }
+    } finally {
+      setActionLoading(null);
+    }
   }, []);
 
   useEffect(() => {
@@ -419,6 +688,13 @@ export default function OBSDashboard() {
 
   const isConnected = status === "connected" && window.isOBSConnected?.();
 
+  useEffect(() => {
+    if (!isConnected) {
+      setSoundEffectsCardExpanded(false);
+      setSettingsCardExpanded(false);
+    }
+  }, [isConnected]);
+
   function DashboardCard({ id, children, glow }: { id: keyof LayoutState; children: ReactNode; glow?: "green" | "red" }) {
     const lay = layout[id] ?? DEFAULT_LAYOUT[id];
     if (!lay) return <>{children}</>;
@@ -484,11 +760,12 @@ export default function OBSDashboard() {
           </div>
         </header>
 
-        <main ref={mainRef} className="flex flex-col px-4 pt-4 pb-8 min-h-[calc(100vh-3rem)] w-full">
+        <main
+          ref={mainRef}
+          className={`flex flex-col px-4 pt-4 pb-8 min-h-[calc(100vh-3rem)] w-full rounded-xl ${isConnected ? "border-2 border-emerald-500/70 obs-card-glow-green" : "border-2 border-red-500/70 obs-card-glow-red"}`}
+        >
           {/* Connection: full-width row, not draggable */}
-          <section
-            className={`mb-4 w-full shrink-0 rounded-xl border bg-slate-800/40 shadow-xl overflow-hidden ${isConnected ? "border-2 border-emerald-500/70 obs-card-glow-green" : "border-2 border-red-500/70 obs-card-glow-red"}`}
-          >
+          <section className="mb-4 w-full shrink-0 rounded-xl border border-slate-700/60 bg-slate-800/40 shadow-xl overflow-hidden">
             <div
               role="button"
               tabIndex={0}
@@ -540,8 +817,8 @@ export default function OBSDashboard() {
                   <button
                     type="button"
                     onClick={connect}
-                    disabled={!scriptReady || status === "connecting"}
-                    title={!scriptReady ? "Loading OBS connection script…" : undefined}
+                    disabled={!scriptReady || status === "connecting" || !url.trim()}
+                    title={!scriptReady ? "Loading OBS connection script…" : !url.trim() ? "Select or enter a WebSocket URL" : undefined}
                     className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50"
                   >
                     {status === "connecting" ? (
@@ -557,8 +834,6 @@ export default function OBSDashboard() {
               </div>
             </div>
 
-            {connectionExpanded && (
-              <>
             {errorMessage && (
               <div className="mx-5 mt-4 flex items-center gap-2 rounded-lg bg-red-900/30 px-4 py-3 text-sm text-red-200">
                 <AlertCircle className="h-5 w-5 shrink-0" />
@@ -566,16 +841,40 @@ export default function OBSDashboard() {
               </div>
             )}
 
+            {connectionExpanded && (
+              <>
             <div className="grid grid-cols-[minmax(140px,max-content)_1fr] gap-x-4 gap-y-4 p-5 items-center">
               <label className="text-sm font-medium text-slate-300">WebSocket URL</label>
-              <input
-                type="text"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="ws://localhost:4455"
-                disabled={isConnected}
-                className="w-full min-w-0 rounded-lg border border-slate-600 bg-slate-900/80 px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-70"
-              />
+              <div className="flex flex-col gap-2 min-w-0">
+                <select
+                  value={
+                    WS_URL_OPTIONS.includes(url as (typeof WS_URL_OPTIONS)[number]) || savedCustomUrls.includes(url)
+                      ? url
+                      : WS_URL_CUSTOM
+                  }
+                  onChange={(e) => setUrl(e.target.value === WS_URL_CUSTOM ? "" : e.target.value)}
+                  disabled={isConnected}
+                  className="w-full min-w-0 rounded-lg border border-slate-600 bg-slate-900/80 px-4 py-2.5 text-slate-100 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-70"
+                >
+                  {WS_URL_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                  {savedCustomUrls.filter((u) => !WS_URL_OPTIONS.includes(u as (typeof WS_URL_OPTIONS)[number])).map((u) => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                  <option value={WS_URL_CUSTOM}>Custom…</option>
+                </select>
+                {(!url || (!WS_URL_OPTIONS.includes(url as (typeof WS_URL_OPTIONS)[number]) && !savedCustomUrls.includes(url))) && (
+                  <input
+                    type="text"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    placeholder="e.g. ws://localhost:4455"
+                    disabled={isConnected}
+                    className="w-full min-w-0 rounded-lg border border-slate-600 bg-slate-900/80 px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-70"
+                  />
+                )}
+              </div>
               <label className="text-sm font-medium text-slate-300">Password (optional)</label>
               <input
                 type="password"
@@ -593,12 +892,14 @@ export default function OBSDashboard() {
           {/* Marquee row (100% width, below Connection, above Event & Matchup) + Event & Matchup row */}
           <div className="mb-4 w-full shrink-0 flex flex-col gap-4">
             <EventAndMatchupEditor
+              obsConnected={isConnected}
               renderMarqueeRow={(marqueeContent) => marqueeContent}
               renderSections={({ eventMatchup, standings, playerList, paths, fontSizes }) => (
                 <section className="w-full shrink-0 flex flex-row flex-wrap items-stretch min-h-0 gap-4">
                   <ResizablePanel
                     defaultWidth={420}
                     storageKey="streaming-terminal-event-matchup-card-width"
+                    contentOverflowVisible
                   >
                     <div className="rounded-xl border border-slate-700/60 bg-slate-800/40 shadow-xl overflow-visible h-full min-h-0 overflow-y-auto">
                       {eventMatchup}
@@ -608,11 +909,25 @@ export default function OBSDashboard() {
                     defaultWidth={320}
                     storageKey="streaming-terminal-standings-card-width"
                   >
-                    <div className="h-full min-h-0 overflow-y-auto rounded-xl border border-slate-700/60 bg-slate-800/40 shadow-xl p-4 flex flex-col gap-4">
-                      {standings}
-                      {playerList}
-                      {fontSizes}
-                      {paths}
+                    <div className="h-full min-h-0 flex flex-col rounded-xl border border-slate-700/60 bg-slate-800/40 shadow-xl overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => { if (!isConnected) return; setSettingsCardExpanded((e) => !e); }}
+                        className="flex w-full items-center gap-2 border-b border-slate-700/60 px-4 py-3 text-left text-base font-semibold text-white hover:bg-slate-700/20 transition-colors shrink-0 disabled:opacity-70"
+                        title={!isConnected ? "Connect to OBS to open Settings" : undefined}
+                      >
+                        {settingsCardExpanded ? <ChevronDown className="h-5 w-5 text-slate-400" /> : <ChevronRight className="h-5 w-5 text-slate-400" />}
+                        <Settings2 className="h-5 w-5 text-slate-400" />
+                        Settings
+                      </button>
+                      {settingsCardExpanded && (
+                        <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-4">
+                          {standings}
+                          {playerList}
+                          {fontSizes}
+                          {paths}
+                        </div>
+                      )}
                     </div>
                   </ResizablePanel>
                   <ResizablePanel
@@ -635,10 +950,12 @@ export default function OBSDashboard() {
                       <div className="p-4 space-y-4 overflow-y-auto min-h-0 flex-1">
                         {/* Stream */}
                         <div className="rounded-lg border border-slate-600/60 bg-slate-900/40 overflow-hidden">
-                          <h3 className="flex items-center gap-2 border-b border-slate-600/60 px-3 py-2 text-sm font-semibold text-slate-200">
+                          <button type="button" onClick={() => setStreamExpanded((e) => !e)} className="flex w-full items-center gap-2 border-b border-slate-600/60 px-3 py-2 text-left text-sm font-semibold text-slate-200 hover:bg-slate-700/30 transition-colors">
+                            {streamExpanded ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
                             <Radio className="h-4 w-4 text-slate-400" />
                             Stream
-                          </h3>
+                          </button>
+                          {streamExpanded && (
                           <div className="space-y-3 p-3">
                             <div className="flex items-center justify-between">
                               <span className="text-xs text-slate-400">Status</span>
@@ -659,13 +976,16 @@ export default function OBSDashboard() {
                               </button>
                             </div>
                           </div>
+                          )}
                         </div>
                         {/* Recording */}
                         <div className="rounded-lg border border-slate-600/60 bg-slate-900/40 overflow-hidden">
-                          <h3 className="flex items-center gap-2 border-b border-slate-600/60 px-3 py-2 text-sm font-semibold text-slate-200">
+                          <button type="button" onClick={() => setRecordingExpanded((e) => !e)} className="flex w-full items-center gap-2 border-b border-slate-600/60 px-3 py-2 text-left text-sm font-semibold text-slate-200 hover:bg-slate-700/30 transition-colors">
+                            {recordingExpanded ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
                             <Square className="h-4 w-4 text-slate-400" />
                             Recording
-                          </h3>
+                          </button>
+                          {recordingExpanded && (
                           <div className="space-y-3 p-3">
                             <div className="flex items-center justify-between">
                               <span className="text-xs text-slate-400">Status</span>
@@ -685,13 +1005,16 @@ export default function OBSDashboard() {
                               </button>
                             </div>
                           </div>
+                          )}
                         </div>
                         {/* Scenes */}
                         <div className="rounded-lg border border-slate-600/60 bg-slate-900/40 overflow-hidden">
-                          <h3 className="flex items-center gap-2 border-b border-slate-600/60 px-3 py-2 text-sm font-semibold text-slate-200">
+                          <button type="button" onClick={() => setScenesExpanded((e) => !e)} className="flex w-full items-center gap-2 border-b border-slate-600/60 px-3 py-2 text-left text-sm font-semibold text-slate-200 hover:bg-slate-700/30 transition-colors">
+                            {scenesExpanded ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
                             <Tv className="h-4 w-4 text-slate-400" />
                             Scenes
-                          </h3>
+                          </button>
+                          {scenesExpanded && (
                           <div className="p-3">
                             {scenes.length === 0 ? (
                               <p className="text-xs text-slate-400">No scenes or loading…</p>
@@ -712,10 +1035,74 @@ export default function OBSDashboard() {
                               </div>
                             )}
                           </div>
+                          )}
                         </div>
                       </div>
                     </div>
                   )}
+                  </ResizablePanel>
+                  <ResizablePanel
+                    defaultWidth={240}
+                    storageKey="streaming-terminal-sound-effects-card-width"
+                  >
+                    <div className="shrink-0 self-stretch min-h-0 rounded-xl border border-slate-700/60 bg-slate-800/40 shadow-xl overflow-hidden flex flex-col h-full">
+                      <button
+                        type="button"
+                        onClick={() => { if (!isConnected) return; setSoundEffectsCardExpanded((e) => !e); }}
+                        className="flex w-full items-center gap-2 border-b border-slate-700/60 px-4 py-3 text-left text-base font-semibold text-white hover:bg-slate-700/20 transition-colors shrink-0 disabled:opacity-70"
+                        title={!isConnected ? "Connect to OBS to open Sound Effects" : undefined}
+                      >
+                        {soundEffectsCardExpanded ? <ChevronDown className="h-5 w-5 text-slate-400" /> : <ChevronRight className="h-5 w-5 text-slate-400" />}
+                        <Volume2 className="h-5 w-5 text-slate-400" />
+                        Sound Effects
+                      </button>
+                      {soundEffectsCardExpanded && (
+                      <div className="p-4 overflow-y-auto min-h-0 flex-1 flex flex-col gap-3">
+                        <input
+                          ref={soundFileInputRef}
+                          type="file"
+                          accept={AUDIO_ACCEPT}
+                          multiple
+                          className="hidden"
+                          onChange={(e) => {
+                            const files = e.target.files;
+                            if (files?.length) addSoundFiles(files);
+                            e.target.value = "";
+                          }}
+                        />
+                        <div
+                          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setSoundDropActive(true); }}
+                          onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setSoundDropActive(false); }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setSoundDropActive(false);
+                            if (e.dataTransfer.files.length) addSoundFiles(e.dataTransfer.files);
+                          }}
+                          onClick={() => soundFileInputRef.current?.click()}
+                          className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-3 py-4 text-center cursor-pointer transition-colors ${soundDropActive ? "border-emerald-500 bg-emerald-500/10 text-emerald-400" : "border-slate-600 bg-slate-900/40 text-slate-400 hover:border-slate-500 hover:bg-slate-800/60"}`}
+                        >
+                          <Upload className="h-6 w-6 shrink-0" />
+                          <span className="text-xs font-medium">Drop audio files or click to browse</span>
+                        </div>
+                        {soundFiles.length > 0 && (
+                          <ul className="flex flex-col gap-1.5 min-w-0">
+                            {soundFiles.map((item) => (
+                              <li key={item.id} className="flex items-center gap-2 rounded-lg border border-slate-600/60 bg-slate-800/60 px-2 py-1.5 min-w-0">
+                                <span className="truncate text-sm text-slate-200 flex-1 min-w-0" title={item.name}>{item.name}</span>
+                                <button type="button" onClick={() => playSoundInOBS(item)} disabled={!isConnected || actionLoading !== null} className="shrink-0 p-1 rounded text-slate-400 hover:text-emerald-400 hover:bg-slate-700/80 transition-colors disabled:opacity-50" title={isConnected ? "Play in OBS" : "Connect to OBS to play"}>
+                                  {actionLoading === `sound-${item.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                                </button>
+                                <button type="button" onClick={() => removeSoundFile(item.id)} className="shrink-0 p-1 rounded text-slate-400 hover:text-red-400 hover:bg-slate-700/80 transition-colors" title="Remove">
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                      )}
+                    </div>
                   </ResizablePanel>
                 </section>
               )}

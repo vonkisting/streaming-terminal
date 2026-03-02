@@ -16,6 +16,9 @@
 # production
 /build
 
+# temp uploads (e.g. sound effects)
+.temp/
+
 # misc
 .DS_Store
 *.pem

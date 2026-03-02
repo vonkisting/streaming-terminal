@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920, height=1080">
+  <title>Matchup Card (live updates)</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; width: 1920px; height: 1080px; background: transparent; display: flex; align-items: center; justify-content: center; font-family: system-ui, sans-serif; }
+    #matchup-container { width: 100%; max-width: 672px; margin: 0 auto; }
+  </style>
+</head>
+<body>
+  <div id="matchup-container"><!-- Updated via UpdateMatchupCard --></div>
+
+  <script>
+    // Replace with your app host (e.g. where this Next.js app runs). Use wss:// if same host over HTTPS.
+    var WS_URL = "ws://localhost:4455";
+    if (typeof OVERLAY_WS_URL !== "undefined") WS_URL = OVERLAY_WS_URL;
+
+    var ws = new WebSocket(WS_URL);
+    ws.onmessage = function (e) {
+      try {
+        var msg = JSON.parse(e.data);
+        if (msg.type === "matchup" && typeof UpdateMatchupCard === "function") {
+          // msg.html includes suit balls and cueball position; msg.suitsSwapped and msg.whoseTurn are optional for partial updates.
+          UpdateMatchupCard(msg.html, msg);
+        }
+      } catch (err) {}
+    };
+    ws.onclose = function () { setTimeout(function () { location.reload(); }, 2000); };
+
+    // Updates the card (suit balls + cueball position). Full replace from html; opts.suitsSwapped/opts.whoseTurn available for partial updates.
+    function UpdateMatchupCard(html, opts) {
+      var el = document.getElementById("matchup-container");
+      if (el && typeof html === "string") el.innerHTML = html;
+    }
+  </script>
+</body>
+</html>

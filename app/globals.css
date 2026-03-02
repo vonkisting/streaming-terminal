@@ -26,19 +26,19 @@ body {
 
 @keyframes obs-glow-green {
   0%, 100% {
-    box-shadow: 0 0 6px rgba(16, 185, 129, 0.6), 0 0 20px rgba(16, 185, 129, 0.3), inset 0 0 0 1px rgba(16, 185, 129, 0.2);
+    box-shadow: 0 0 20px rgba(16, 185, 129, 0.7), 0 0 60px rgba(16, 185, 129, 0.5), 0 0 100px rgba(16, 185, 129, 0.25), inset 0 0 0 1px rgba(16, 185, 129, 0.3);
   }
   50% {
-    box-shadow: 0 0 16px rgba(16, 185, 129, 0.9), 0 0 40px rgba(16, 185, 129, 0.5), inset 0 0 0 1px rgba(16, 185, 129, 0.4);
+    box-shadow: 0 0 40px rgba(16, 185, 129, 0.9), 0 0 100px rgba(16, 185, 129, 0.6), 0 0 160px rgba(16, 185, 129, 0.35), inset 0 0 0 1px rgba(16, 185, 129, 0.5);
   }
 }
 
 @keyframes obs-glow-red {
   0%, 100% {
-    box-shadow: 0 0 6px rgba(239, 68, 68, 0.6), 0 0 20px rgba(239, 68, 68, 0.3), inset 0 0 0 1px rgba(239, 68, 68, 0.2);
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.7), 0 0 60px rgba(239, 68, 68, 0.5), 0 0 100px rgba(239, 68, 68, 0.25), inset 0 0 0 1px rgba(239, 68, 68, 0.3);
   }
   50% {
-    box-shadow: 0 0 16px rgba(239, 68, 68, 0.9), 0 0 40px rgba(239, 68, 68, 0.5), inset 0 0 0 1px rgba(239, 68, 68, 0.4);
+    box-shadow: 0 0 40px rgba(239, 68, 68, 0.9), 0 0 100px rgba(239, 68, 68, 0.6), 0 0 160px rgba(239, 68, 68, 0.35), inset 0 0 0 1px rgba(239, 68, 68, 0.5);
   }
 }
 

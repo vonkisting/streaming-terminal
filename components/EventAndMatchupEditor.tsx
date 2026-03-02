@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useMarquee } from "./TournamentMarqueeContext";
 import MarqueeBanner from "./MarqueeBanner";
@@ -58,9 +59,11 @@ interface EventAndMatchupEditorProps {
     fontSizes: React.ReactNode;
   }) => React.ReactNode;
   renderMarqueeRow?: (marqueeContent: React.ReactNode) => React.ReactNode;
+  /** When false, all sections stay collapsed until OBS is connected (used on OBS Dashboard). */
+  obsConnected?: boolean;
 }
 
-export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow }: EventAndMatchupEditorProps = {}) {
+export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow, obsConnected }: EventAndMatchupEditorProps = {}) {
   const { setMarquee, setMarqueePath, setMatchupCardPath, marqueePath, matchupCardPath } = useMarquee();
   const [savedEvents, setSavedEvents] = useState<Record<string, TournamentData>>({});
   const [loadedEventKey, setLoadedEventKey] = useState<string | null>(null);
@@ -70,7 +73,7 @@ export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow
   const [playerNames, setPlayerNames] = useState<string[]>([]);
   const [marqueeEnabled, setMarqueeEnabled] = useState(false);
   const [marqueeSpeed, setMarqueeSpeed] = useState(50);
-  const [standingsExpanded, setStandingsExpanded] = useState(true);
+  const [standingsExpanded, setStandingsExpanded] = useState(false);
   const [standings, setStandings] = useState<Record<number, number>>({});
   const [saveMessage, setSaveMessage] = useState("");
   const [currentMatchupPlayer1, setCurrentMatchupPlayer1] = useState<number>(-1);
@@ -89,13 +92,29 @@ export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow
   const [subTextFontSize, setSubTextFontSize] = useState(DEFAULT_SUB_TEXT_FONT_SIZE);
   const [playerNameFontSize, setPlayerNameFontSize] = useState(DEFAULT_PLAYER_NAME_FONT_SIZE);
   const [marqueeFontSize, setMarqueeFontSize] = useState(DEFAULT_MARQUEE_FONT_SIZE);
-  const [fontSizesExpanded, setFontSizesExpanded] = useState(true);
+  const [fontSizesExpanded, setFontSizesExpanded] = useState(false);
   const [marqueeExpanded, setMarqueeExpanded] = useState(true);
-  const [playerListExpanded, setPlayerListExpanded] = useState(true);
+  const [playerListExpanded, setPlayerListExpanded] = useState(false);
   const [eventMatchupSectionExpanded, setEventMatchupSectionExpanded] = useState(true);
-  const [pathsExpanded, setPathsExpanded] = useState(true);
-  const [matchupCardExpanded, setMatchupCardExpanded] = useState(true);
+  const [pathsExpanded, setPathsExpanded] = useState(false);
   const [showNameTakenModal, setShowNameTakenModal] = useState(false);
+
+  useEffect(() => {
+    if (obsConnected === false) {
+      setEventMatchupSectionExpanded(false);
+      setStandingsExpanded(false);
+      setPathsExpanded(false);
+      setFontSizesExpanded(false);
+      setMarqueeExpanded(false);
+      setPlayerListExpanded(false);
+    }
+  }, [obsConnected]);
+
+  useEffect(() => {
+    if (loadedEventKey && obsConnected !== false) {
+      setEventMatchupSectionExpanded(true);
+    }
+  }, [loadedEventKey, obsConnected]);
   const [lastMarqueeUploadAt, setLastMarqueeUploadAt] = useState<string | null>(null);
   const [showCopyNotification, setShowCopyNotification] = useState(false);
   const copyNotificationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -104,7 +123,31 @@ export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow
   const [turnFontSize, setTurnFontSize] = useState(14);
   const turnToggleRef = useRef<HTMLDivElement>(null);
   const turnMeasureRef = useRef<HTMLSpanElement>(null);
+  const eventDropdownAnchorRef = useRef<HTMLDivElement>(null);
+  const [dropdownRect, setDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   useEffect(() => setSavedEvents(getStoredData()), []);
+
+  const updateDropdownRect = useCallback(() => {
+    const el = eventDropdownAnchorRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setDropdownRect({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!dropdownOpen) {
+      setDropdownRect(null);
+      return;
+    }
+    updateDropdownRect();
+    const onScrollOrResize = () => updateDropdownRect();
+    window.addEventListener("scroll", onScrollOrResize, true);
+    window.addEventListener("resize", onScrollOrResize);
+    return () => {
+      window.removeEventListener("scroll", onScrollOrResize, true);
+      window.removeEventListener("resize", onScrollOrResize);
+    };
+  }, [dropdownOpen, updateDropdownRect]);
 
   const clearToDefaults = useCallback((newEventName: string) => {
     setEventName(newEventName);
@@ -292,97 +335,18 @@ export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow
 
   useEffect(() => {
     setMarquee(marqueePayload);
-    fetch("/api/overlay", {
+    fetch("/api/overlay/save-obs-marquee", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ marquee: marqueePayload }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        const pathToShow = (data?.marqueeUrl ?? data?.path ?? data?.savedPath ?? "").trim();
-        if (pathToShow) setMarqueePath(pathToShow);
-        const matchupPath = (data?.matchupCardUrl ?? "").trim();
-        if (matchupPath) setMatchupCardPath(matchupPath);
-        if (data?.githubUploadedAt) setLastMarqueeUploadAt(data.githubUploadedAt);
-        if (data?.ok && typeof window !== "undefined") {
-          const win = window as unknown as { obsRequest?: (type: string, data?: Record<string, unknown>) => Promise<unknown>; isOBSConnected?: () => boolean; reloadBrowserSource?: (name: string) => Promise<void> };
-          const base = ((typeof process !== "undefined" && process.env?.NEXT_PUBLIC_STREAM_OVERLAY_BASE_URL) || "http://stream.poolhub.us").replace(/\/$/, "");
-          const cacheBust = `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-          const marqueeUrlForObs = `${base}/marquee.html?v=${encodeURIComponent(cacheBust)}`;
-          const matchupCardUrlForObs = `${base}/matchupcard.html?v=${encodeURIComponent(cacheBust)}`;
-
-          const ensureBrowserAndSetUrl = async (
-            sceneName: string,
-            listData: { sceneItems?: { sceneItemId: number; sourceName?: string }[] },
-            inputName: string,
-            url: string,
-          ) => {
-            let items = listData?.sceneItems ?? [];
-            let item = items.find((i) => i.sourceName === inputName);
-            if (item == null) {
-              try {
-                await win.obsRequest!("CreateInput", {
-                  sceneName,
-                  inputName,
-                  inputKind: "browser_source",
-                  inputSettings: { url, width: 1920, height: 1080 },
-                });
-              } catch (createErr) {
-                const errMsg = String(createErr ?? "");
-                if (errMsg.includes("already") || errMsg.includes("exists")) {
-                  await win.obsRequest!("CreateSceneItem", { sceneName, sourceName: inputName }).catch(() => {});
-                }
-              }
-              const next = (await win.obsRequest!("GetSceneItemList", { sceneName })) as { sceneItems?: { sceneItemId: number; sourceName?: string }[] };
-              items = next?.sceneItems ?? [];
-              item = items.find((i) => i.sourceName === inputName);
-            }
-            if (item != null) {
-              await win.obsRequest!("SetSceneItemEnabled", { sceneName, sceneItemId: item.sceneItemId, sceneItemEnabled: true });
-            }
-            await win.obsRequest!("SetInputSettings", { inputName, inputSettings: { url } });
-          };
-
-          const sendUrlsToOBS = () => {
-            if (!win.obsRequest) return false;
-            try {
-              (async () => {
-                try {
-                  const sceneData = (await win.obsRequest!("GetCurrentProgramScene", {})) as { currentProgramSceneName?: string };
-                  const sceneName = sceneData?.currentProgramSceneName;
-                  if (!sceneName) return;
-                  let listData = (await win.obsRequest!("GetSceneItemList", { sceneName })) as { sceneItems?: { sceneItemId: number; sourceName?: string }[] };
-                  if (marqueeEnabled) {
-                    await ensureBrowserAndSetUrl(sceneName, listData, "Marquee", marqueeUrlForObs);
-                    listData = (await win.obsRequest!("GetSceneItemList", { sceneName })) as { sceneItems?: { sceneItemId: number; sourceName?: string }[] };
-                  }
-                  await ensureBrowserAndSetUrl(sceneName, listData, "Matchup Card", matchupCardUrlForObs);
-                } catch (_) {}
-              })();
-              return true;
-            } catch {
-              return false;
-            }
-          };
-
-          if (win.isOBSConnected?.()) {
-            sendUrlsToOBS();
-          } else {
-            setTimeout(() => {
-              sendUrlsToOBS();
-            }, 150);
-            setTimeout(() => sendUrlsToOBS(), 1000);
-          }
-        }
-      })
-      .catch(() => {});
+    }).catch(() => {});
   }, [
     eventName, standings, playerNames, marqueeEnabled, marqueeSpeed,
     currentMatchupPlayer1, currentMatchupPlayer2, showMatchupScore, showMatchupRace,
     matchupPlayer1Score, matchupPlayer2Score, matchupPlayer1Race, matchupPlayer2Race,
     matchupRound, matchupWhoseTurn, matchupSuit, suitsImagesSwapped,
     eventNameFontSize, subTextFontSize, playerNameFontSize, marqueeFontSize,
-    setMarquee, setMarqueePath, setMatchupCardPath,
+    setMarquee,
   ]);
 
   useEffect(() => {
@@ -542,9 +506,56 @@ export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow
     }
   }, [marqueeEnabled, marqueePath]);
 
+  // Set Matchup Card browser source URL in OBS when path is set and OBS is connected. Use stable URL so updates go via WebSocket (no reload/flicker).
+  useEffect(() => {
+    const win = typeof window !== "undefined" ? window : null;
+    const obsRequest = win?.obsRequest as ((type: string, data?: Record<string, unknown>) => Promise<unknown>) | undefined;
+    const isConnected = win?.isOBSConnected?.();
+    if (!obsRequest || !isConnected || !matchupCardPath?.trim()) return;
+
+    const getMatchupCardUrl = (): string => {
+      const base = matchupCardPath.trim();
+      if (base.startsWith("http://") || base.startsWith("https://")) return base;
+      const origin = win?.location?.origin ?? "";
+      return origin + (base.startsWith("/") ? base : "/" + base);
+    };
+
+    (async () => {
+      try {
+        const sceneData = (await obsRequest("GetCurrentProgramScene", {})) as { currentProgramSceneName?: string };
+        const sceneName = sceneData?.currentProgramSceneName;
+        if (!sceneName) return;
+        const listData = (await obsRequest("GetSceneItemList", { sceneName })) as { sceneItems?: { sceneItemId: number; sourceName?: string }[] };
+        const items = listData?.sceneItems ?? [];
+        let item = items.find((i) => i.sourceName === "Matchup Card");
+        if (item == null) {
+          try {
+            await obsRequest("CreateInput", {
+              sceneName,
+              inputName: "Matchup Card",
+              inputKind: "browser_source",
+              inputSettings: { url: getMatchupCardUrl(), width: 1920, height: 1080 },
+            });
+          } catch (createErr) {
+            const errMsg = String(createErr ?? "");
+            if (errMsg.includes("already") || errMsg.includes("exists")) {
+              await obsRequest("CreateSceneItem", { sceneName, sourceName: "Matchup Card" }).catch(() => {});
+            }
+          }
+          const next = (await obsRequest("GetSceneItemList", { sceneName })) as { sceneItems?: { sceneItemId: number; sourceName?: string }[] };
+          item = next?.sceneItems?.find((i) => i.sourceName === "Matchup Card");
+        }
+        if (item != null) {
+          await obsRequest("SetSceneItemEnabled", { sceneName, sceneItemId: item.sceneItemId, sceneItemEnabled: true });
+          await obsRequest("SetInputSettings", { inputName: "Matchup Card", inputSettings: { url: getMatchupCardUrl() } });
+        }
+      } catch (_) {}
+    })();
+  }, [matchupCardPath]);
+
   const standingsBlock = (
     <div className="rounded-lg border border-slate-600/60 bg-slate-800/40 p-4">
-      <button type="button" onClick={() => setStandingsExpanded((p) => !p)} className="flex items-center gap-2 w-full text-left text-sm font-medium text-slate-300 hover:text-white">
+      <button type="button" onClick={() => { if (obsConnected === false) return; setStandingsExpanded((p) => !p); }} className="flex items-center gap-2 w-full text-left text-sm font-medium text-slate-300 hover:text-white">
         {standingsExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
         Final Standings
       </button>
@@ -580,7 +591,7 @@ export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow
     <div className="rounded-lg border border-slate-600/60 bg-slate-800/40 overflow-hidden">
       <button
         type="button"
-        onClick={() => setPathsExpanded((p) => !p)}
+        onClick={() => { if (obsConnected === false) return; setPathsExpanded((p) => !p); }}
         className="flex w-full items-center gap-2 p-4 text-left text-sm font-semibold text-slate-300 hover:bg-slate-700/30 transition-colors"
       >
         {pathsExpanded ? <ChevronDown className="w-4 h-4 shrink-0" /> : <ChevronRight className="w-4 h-4 shrink-0" />}
@@ -605,7 +616,7 @@ export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow
 
   const fontSizesBlock = (
     <div className="rounded-lg border border-slate-600/60 bg-slate-800/40 p-4">
-      <button type="button" onClick={() => setFontSizesExpanded((p) => !p)} className="flex items-center gap-2 w-full text-left text-sm font-medium text-slate-300 hover:text-white">
+      <button type="button" onClick={() => { if (obsConnected === false) return; setFontSizesExpanded((p) => !p); }} className="flex items-center gap-2 w-full text-left text-sm font-medium text-slate-300 hover:text-white">
         {fontSizesExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
         Font Sizes
       </button>
@@ -634,7 +645,7 @@ export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow
 
   const playerListBlock = (
     <div className="rounded-lg border border-slate-600/60 bg-slate-800/40 p-4">
-      <button type="button" onClick={() => setPlayerListExpanded((p) => !p)} className="flex items-center gap-2 w-full text-left text-sm font-medium text-slate-300 hover:text-white">
+      <button type="button" onClick={() => { if (obsConnected === false) return; setPlayerListExpanded((p) => !p); }} className="flex items-center gap-2 w-full text-left text-sm font-medium text-slate-300 hover:text-white">
         {playerListExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
         Player List {playerCount > 0 && `(${playerCount})`}
       </button>
@@ -660,7 +671,7 @@ export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow
   const marqueeBlock = (
     <div className="rounded-lg border border-slate-600/60 bg-slate-800/40 p-4">
       <div className="flex items-stretch gap-3 w-full min-w-0">
-        <button type="button" onClick={() => setMarqueeExpanded((p) => !p)} className="flex shrink-0 items-center gap-2 text-left text-sm font-medium text-slate-300 hover:text-white">
+        <button type="button" onClick={() => { if (obsConnected === false) return; setMarqueeExpanded((p) => !p); }} className="flex shrink-0 items-center gap-2 text-left text-sm font-medium text-slate-300 hover:text-white">
           {marqueeExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
           Marquee
         </button>
@@ -689,14 +700,14 @@ export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow
       <div className="flex flex-wrap items-center gap-3 border-b border-slate-700/60 px-5 py-3">
         <button
           type="button"
-          onClick={() => setEventMatchupSectionExpanded((p) => !p)}
+          onClick={() => { if (obsConnected === false) return; setEventMatchupSectionExpanded((p) => !p); }}
           className="flex shrink-0 items-center gap-2 text-left text-lg font-semibold text-white hover:opacity-90 transition-opacity"
         >
           {eventMatchupSectionExpanded ? <ChevronDown className="w-5 h-5 shrink-0" /> : <ChevronRight className="w-5 h-5 shrink-0" />}
           Event & Matchup
         </button>
         <div className="flex flex-1 min-w-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
-          <div className="relative flex-1 min-w-0">
+          <div ref={eventDropdownAnchorRef} className="relative flex-1 min-w-0">
             <input
               type="text"
               value={eventName}
@@ -709,14 +720,6 @@ export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow
             <button type="button" onClick={() => setDropdownOpen((o) => !o)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-white" tabIndex={-1}>
               <ChevronDown className="w-4 h-4" />
             </button>
-            {dropdownOpen && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto">
-                <button type="button" className="w-full text-left px-4 py-2 text-slate-200 hover:bg-slate-700 text-sm border-b border-slate-600/50" onMouseDown={() => handleSelectNone()}>&lt; None &gt;</button>
-                {Object.keys(savedEvents).map((name) => (
-                  <button key={name} type="button" className="w-full text-left px-4 py-2 text-slate-200 hover:bg-slate-700 text-sm" onMouseDown={() => handleSelectSavedEvent(name)}>{name}</button>
-                ))}
-              </div>
-            )}
           </div>
           {loadedEventKey === null && (
             <button type="button" onClick={handleCreate} className="shrink-0 px-4 py-2 text-xs font-medium bg-slate-600 hover:bg-slate-500 text-white rounded-lg">Create</button>
@@ -725,27 +728,31 @@ export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow
         {saveMessage && <span className="text-sm text-slate-400">{saveMessage}</span>}
       </div>
 
+      {typeof document !== "undefined" &&
+        dropdownOpen &&
+        dropdownRect &&
+        createPortal(
+          <div
+            className="fixed z-[200] bg-slate-800 border border-slate-600 rounded-lg shadow-lg max-h-64 overflow-y-auto"
+            style={{ top: dropdownRect.top, left: dropdownRect.left, width: dropdownRect.width }}
+          >
+            <button type="button" className="w-full text-left px-4 py-2 text-slate-200 hover:bg-slate-700 text-sm border-b border-slate-600/50" onMouseDown={() => handleSelectNone()}>&lt; None &gt;</button>
+            {Object.keys(savedEvents).map((name) => (
+              <button key={name} type="button" className="w-full text-left px-4 py-2 text-slate-200 hover:bg-slate-700 text-sm" onMouseDown={() => handleSelectSavedEvent(name)}>{name}</button>
+            ))}
+          </div>,
+          document.body
+        )}
+
       {eventMatchupSectionExpanded && (
         <div className="p-5 overflow-visible space-y-6">
       {hasEventLoaded && (
         <>
-      {/* Matchup */}
-      <div className="rounded-lg border border-slate-600/60 bg-slate-800/40 overflow-visible">
-        <button
-          type="button"
-          onClick={() => setMatchupCardExpanded((p) => !p)}
-          className="flex w-full items-center gap-2 p-4 text-left text-sm font-semibold text-slate-300 hover:bg-slate-700/30 transition-colors"
-        >
-          {matchupCardExpanded ? <ChevronDown className="w-4 h-4 shrink-0" /> : <ChevronRight className="w-4 h-4 shrink-0" />}
-          Matchup
-        </button>
-        {matchupCardExpanded && (
-          <div className="px-4 pb-4 pt-0 min-h-0 overflow-visible space-y-4">
-            <div className="rounded-lg border border-slate-600/60 bg-slate-900/40 p-4 min-h-0 overflow-visible pt-4">
+      <div className="space-y-4">
+            <div className="rounded-lg border border-slate-600/60 bg-slate-900/40 p-4 min-h-0 overflow-visible">
               <MatchupCard />
             </div>
-            {hasEventLoaded && (
-              <div className="space-y-3">
+            <div className="space-y-3">
                 <div className="flex items-center gap-2">
                   <label className="text-slate-500 text-sm w-16 shrink-0">Player 1</label>
                   <select value={currentMatchupPlayer1} onChange={(e) => { const v = parseInt(e.target.value, 10); setCurrentMatchupPlayer1(v); if (v === currentMatchupPlayer2) setCurrentMatchupPlayer2(-1); }} className="flex-1 min-w-0 px-3 py-1.5 text-sm bg-slate-900/80 border border-slate-600 rounded text-white">
@@ -782,6 +789,7 @@ export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow
                       <button type="button" onClick={() => setMatchupSuit(1)} className="flex-1 flex items-center justify-center py-2" aria-pressed={matchupSuit === 1}>
                         <img src={suitsImagesSwapped ? "/pool-ball-15.png" : "/pool-ball-1.png"} alt="1" className="w-8 h-8 object-contain" />
                       </button>
+                      <div className="w-px flex-shrink-0 bg-slate-600 self-stretch min-h-[2rem]" aria-hidden />
                       <button type="button" onClick={() => setMatchupSuit(2)} className="flex-1 flex items-center justify-center py-2" aria-pressed={matchupSuit === 2}>
                         <img src={suitsImagesSwapped ? "/pool-ball-1.png" : "/pool-ball-15.png"} alt="15" className="w-8 h-8 object-contain" />
                       </button>
@@ -822,9 +830,6 @@ export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow
                   </>
                 )}
               </div>
-            )}
-          </div>
-        )}
       </div>
 
       {hasEventLoaded && includePathsInSection && pathsBlock}
@@ -863,6 +868,7 @@ export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow
           <div className="bg-slate-800 border border-slate-600 rounded-xl px-6 py-4 shadow-xl text-slate-200 text-sm">Path copied to clipboard</div>
         </div>
       )}
+
     </section>
   );
 

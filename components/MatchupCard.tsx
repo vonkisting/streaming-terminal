@@ -2,12 +2,19 @@
 
 import { useMarquee } from "./TournamentMarqueeContext";
 
-function CueBallIcon({ className }: { className?: string }) {
+function CueBallIcon({
+  className,
+  svgClassName,
+}: {
+  className?: string;
+  /** When set (e.g. "w-full h-full"), SVG sizes to container instead of default 54/63px */
+  svgClassName?: string;
+}) {
   return (
     <span className={`inline-flex flex-shrink-0 ${className ?? ""}`} aria-hidden>
       <svg
         viewBox="0 0 24 24"
-        className="w-[54px] h-[54px] sm:w-[63px] sm:h-[63px] drop-shadow-md"
+        className={`drop-shadow-md ${svgClassName ?? "w-[54px] h-[54px] sm:w-[63px] sm:h-[63px]"}`}
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
       >
@@ -18,7 +25,7 @@ function CueBallIcon({ className }: { className?: string }) {
             <stop offset="100%" stopColor="#e2e8f0" />
           </linearGradient>
         </defs>
-        <circle cx="12" cy="12" r="11" fill="url(#cueball-shine)" stroke="#000" strokeWidth="1" />
+        <circle cx="12" cy="12" r="11" fill="url(#cueball-shine)" stroke="#000" strokeWidth="2" />
       </svg>
     </span>
   );
@@ -58,6 +65,12 @@ export default function MatchupCard() {
     marquee.currentMatchupPlayer2 >= 0
       ? marquee.playerNames[marquee.currentMatchupPlayer2] || `Player ${marquee.currentMatchupPlayer2 + 1}`
       : "";
+  const nameMinWidthPx = Math.ceil(
+    Math.max(
+      (player1Name || "—").length * playerNameSize * 0.65,
+      (player2Name || "—").length * playerNameSize * 0.65
+    ) + 50
+  );
 
   return (
     <div className="w-full max-w-2xl mx-auto flex flex-col items-center gap-0.5 px-4 py-2 flex-shrink-0">
@@ -77,23 +90,16 @@ export default function MatchupCard() {
         </span>
       </div>
 
-      {/* Middle section – players and scores */}
-      <div className="relative w-full">
-        {whoseTurn === 1 && (
-          <div className="absolute right-full top-1/2 -translate-y-1/2 flex items-center mr-1 sm:mr-2 pointer-events-none">
-            <CueBallIcon />
-          </div>
-        )}
-        {whoseTurn === 2 && (
-          <div className="absolute left-full top-1/2 -translate-y-1/2 flex items-center ml-1 sm:ml-2 pointer-events-none">
-            <CueBallIcon />
-          </div>
-        )}
+      {/* Middle section – players and scores; panel fit-content and centered */}
+      <div className="relative w-full flex justify-center">
         <div
-          className={`${PANEL_CLASS} w-full rounded-l-full rounded-r-full py-2 px-2 sm:px-3 flex items-stretch justify-between gap-0`}
+          className={`${PANEL_CLASS} w-fit rounded-l-full rounded-r-full py-2 px-2 sm:px-3 flex items-stretch justify-between gap-0`}
           style={{ minHeight: `${middleSectionMinHeight}px` }}
         >
-          <div className="flex items-stretch gap-2 min-w-0 flex-1 justify-start rounded-l-full bg-gradient-to-b from-red-950 via-red-900/95 to-black -my-2 -ml-2 sm:-ml-3 pl-2 sm:pl-3">
+          <div
+            className="flex items-stretch gap-2 flex-1 justify-start rounded-l-full bg-gradient-to-b from-red-950 via-red-900/95 to-black -my-2 -ml-2 sm:-ml-3 pl-2 sm:pl-3"
+            style={{ minWidth: `${nameMinWidthPx}px` }}
+          >
             {marquee.showMatchupRace && marquee.showMatchupScore && (
             <div className="flex-shrink-0 flex self-stretch -ml-2 sm:-ml-3 mr-0">
               <span className="w-10 sm:w-12 h-full flex items-center justify-center bg-white border-2 border-slate-400/70 rounded-l-full text-black text-lg sm:text-2xl font-bold tracking-wider text-center leading-normal px-0.5 overflow-hidden">
@@ -111,15 +117,23 @@ export default function MatchupCard() {
                 <div className="w-px self-stretch min-h-[20px] bg-white/50 flex-shrink-0" aria-hidden />
               </>
             )}
-            <div className="flex-1 min-w-0 flex items-center justify-center relative">
+            <div
+              className="flex-1 flex items-center justify-center relative min-w-0"
+              style={{ minWidth: `${nameMinWidthPx}px` }}
+            >
               <img
                 src={firstBallSrc}
                 alt={firstBallAlt}
                 className={`absolute left-0 bottom-full mb-5 w-12 h-12 sm:w-14 sm:h-14 object-contain pointer-events-none border border-black rounded-full ${suitsSwapped ? "scale-[1.15]" : "scale-[1.2]"}`}
                 aria-hidden
               />
+              {whoseTurn === 1 && (
+                <div className="absolute left-0 top-full mt-4 flex items-center justify-center pointer-events-none w-9 h-9 sm:w-11 sm:h-11 overflow-hidden shrink-0 rounded-full">
+                  <CueBallIcon svgClassName="!size-full max-w-full max-h-full" />
+                </div>
+              )}
               <span
-                className="font-semibold uppercase truncate text-white/95 text-center leading-normal"
+                className="font-semibold uppercase whitespace-nowrap text-white/95 text-center leading-normal px-[25px]"
                 style={{ fontSize: `${playerNameSize}px` }}
               >
                 {player1Name || "—"}
@@ -127,22 +141,36 @@ export default function MatchupCard() {
             </div>
           </div>
 
-          <div className="flex-shrink-0 flex self-stretch -my-2">
-            <span className="text-lg sm:text-2xl font-bold text-black tracking-wider bg-white border-2 border-slate-400/70 px-2 min-h-full flex items-center justify-center">
+          <div
+            className="flex-shrink-0 flex items-center justify-center -my-2"
+            style={{ width: `${middleSectionMinHeight + 16}px`, height: `${middleSectionMinHeight + 16}px` }}
+          >
+            <span className="text-lg sm:text-2xl font-bold text-black tracking-wider bg-white border-2 border-slate-400/70 px-2 w-full h-full flex items-center justify-center">
               VS
             </span>
           </div>
 
-          <div className="flex items-stretch gap-2 min-w-0 flex-1 justify-end rounded-r-full bg-gradient-to-b from-blue-950 via-blue-900/95 to-black -my-2 -mr-2 sm:-mr-3 pr-2 sm:pr-3">
-            <div className="flex-1 min-w-0 flex items-center justify-center relative">
+          <div
+            className="flex items-stretch gap-2 flex-1 justify-end rounded-r-full bg-gradient-to-b from-blue-950 via-blue-900/95 to-black -my-2 -mr-2 sm:-mr-3 pr-2 sm:pr-3"
+            style={{ minWidth: `${nameMinWidthPx}px` }}
+          >
+            <div
+              className="flex-1 flex items-center justify-center relative min-w-0"
+              style={{ minWidth: `${nameMinWidthPx}px` }}
+            >
               <img
                 src={secondBallSrc}
                 alt={secondBallAlt}
                 className={`absolute right-0 bottom-full mb-5 w-12 h-12 sm:w-14 sm:h-14 object-contain pointer-events-none border border-black rounded-full ${suitsSwapped ? "scale-[1.2]" : "scale-[1.15]"}`}
                 aria-hidden
               />
+              {whoseTurn === 2 && (
+                <div className="absolute right-0 top-full mt-4 flex items-center justify-center pointer-events-none w-9 h-9 sm:w-11 sm:h-11 overflow-hidden shrink-0 rounded-full">
+                  <CueBallIcon svgClassName="!size-full max-w-full max-h-full" />
+                </div>
+              )}
               <span
-                className="font-semibold uppercase truncate text-white/95 text-center leading-normal"
+                className="font-semibold uppercase whitespace-nowrap text-white/95 text-center leading-normal px-[25px]"
                 style={{ fontSize: `${playerNameSize}px` }}
               >
                 {player2Name || "—"}

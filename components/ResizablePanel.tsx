@@ -11,6 +11,8 @@ interface ResizablePanelProps {
   maxWidth?: number;
   storageKey?: string;
   className?: string;
+  /** When true, content wrapper uses overflow-visible so dropdowns can extend outside */
+  contentOverflowVisible?: boolean;
 }
 
 function getStoredWidth(key: string): number | null {
@@ -37,6 +39,7 @@ export default function ResizablePanel({
   maxWidth = 10000,
   storageKey,
   className = "",
+  contentOverflowVisible = false,
 }: ResizablePanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState<number>(() => {
@@ -97,7 +100,7 @@ export default function ResizablePanel({
 
   return (
     <div ref={containerRef} className={`flex shrink-0 self-stretch min-h-0 ${className}`} style={{ width }}>
-      <div className="flex-1 min-w-0 min-h-0 overflow-hidden flex flex-col">
+      <div className={`flex-1 min-w-0 min-h-0 flex flex-col ${contentOverflowVisible ? "overflow-visible" : "overflow-hidden"}`}>
         {children}
       </div>
       <div
