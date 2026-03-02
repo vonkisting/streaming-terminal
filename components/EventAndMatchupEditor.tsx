@@ -61,9 +61,11 @@ interface EventAndMatchupEditorProps {
   renderMarqueeRow?: (marqueeContent: React.ReactNode) => React.ReactNode;
   /** When false, all sections stay collapsed until OBS is connected (used on OBS Dashboard). */
   obsConnected?: boolean;
+  /** Optional overlay directory path for saving marquee file (e.g. C:\OBS Overlays). */
+  overlayDirectory?: string;
 }
 
-export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow, obsConnected }: EventAndMatchupEditorProps = {}) {
+export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow, obsConnected, overlayDirectory }: EventAndMatchupEditorProps = {}) {
   const { setMarquee, setMarqueePath, setMatchupCardPath, marqueePath, matchupCardPath } = useMarquee();
   const [savedEvents, setSavedEvents] = useState<Record<string, TournamentData>>({});
   const [loadedEventKey, setLoadedEventKey] = useState<string | null>(null);
@@ -346,18 +348,19 @@ export default function EventAndMatchupEditor({ renderSections, renderMarqueeRow
     fetch("/api/overlay/save-obs-marquee", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ marquee: marqueePayload }),
+      body: JSON.stringify({ marquee: marqueePayload, overlayDir: overlayDirectory }),
     })
       .then((r) => r.json())
       .then((data) => {
         if (saveMarqueeNotificationTimeoutRef.current) clearTimeout(saveMarqueeNotificationTimeoutRef.current);
         if (data?.ok) {
-          setSaveMarqueeNotification({ type: "success", message: "Marquee saved to C:\\OBS Overlays\\Marquee.Html" });
-          setMarqueePath("C:\\OBS Overlays\\Marquee.Html");
+          const savedPath = (data.path as string) ?? "C:\\OBS Overlays\\Marquee.Html";
+          setSaveMarqueeNotification({ type: "success", message: `Marquee saved to ${savedPath}` });
+          setMarqueePath(savedPath);
           const win = typeof window !== "undefined" ? window : null;
           const obsRequest = win?.obsRequest as ((type: string, data?: Record<string, unknown>) => Promise<unknown>) | undefined;
           if (obsRequest && win?.isOBSConnected?.()) {
-            const fileUrlWithCache = `file:///C:/OBS%20Overlays/Marquee.Html?t=${Date.now()}`;
+            const fileUrlWithCache = `file:///${savedPath.replace(/\\/g, "/").replace(/ /g, "%20")}?t=${Date.now()}`;
             obsRequest("SetInputSettings", { inputName: "Marquee", inputSettings: { url: fileUrlWithCache } }).catch(() => {});
           }
         } else {

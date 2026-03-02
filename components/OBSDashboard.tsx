@@ -21,6 +21,7 @@ import {
   Upload,
   Play,
   Trash2,
+  FolderOpen,
 } from "lucide-react";
 import EventAndMatchupEditor from "./EventAndMatchupEditor";
 import ResizablePanel from "./ResizablePanel";
@@ -35,6 +36,7 @@ const OBS_WS_URL_STORAGE_KEY = "streaming-terminal-obs-ws-url";
 const CUSTOM_WS_URLS_STORAGE_KEY = "streaming-terminal-custom-ws-urls";
 const MAX_SAVED_CUSTOM_URLS = 20;
 const OBS_WS_PASSWORD_STORAGE_KEY = "streaming-terminal-obs-ws-password";
+const OBS_OVERLAY_DIR_STORAGE_KEY = "streaming-terminal-obs-overlay-dir";
 
 function loadLastObsWsUrl(): string {
   if (typeof window === "undefined") return "";
@@ -43,6 +45,10 @@ function loadLastObsWsUrl(): string {
 function loadLastObsWsPassword(): string {
   if (typeof window === "undefined") return "";
   return localStorage.getItem(OBS_WS_PASSWORD_STORAGE_KEY) ?? "";
+}
+function loadOverlayDir(): string {
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem(OBS_OVERLAY_DIR_STORAGE_KEY) ?? "";
 }
 function loadSavedCustomWsUrls(): string[] {
   if (typeof window === "undefined") return [];
@@ -260,6 +266,7 @@ export default function OBSDashboard() {
   const [scriptReady, setScriptReady] = useState(false);
   const [url, setUrl] = useState(loadLastObsWsUrl);
   const [password, setPassword] = useState(loadLastObsWsPassword);
+  const [overlayDirectory, setOverlayDirectory] = useState(loadOverlayDir);
   const [savedCustomUrls, setSavedCustomUrls] = useState<string[]>(loadSavedCustomWsUrls);
   const [status, setStatus] = useState<ConnectionStatus>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -315,6 +322,16 @@ export default function OBSDashboard() {
       // ignore
     }
   }, [layout]);
+
+  useEffect(() => {
+    try {
+      const v = overlayDirectory.trim();
+      if (v) localStorage.setItem(OBS_OVERLAY_DIR_STORAGE_KEY, v);
+      else localStorage.removeItem(OBS_OVERLAY_DIR_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+  }, [overlayDirectory]);
 
   useEffect(() => {
     if (!dragState && !resizeState) return;
@@ -884,6 +901,40 @@ export default function OBSDashboard() {
                 disabled={isConnected}
                 className="w-full min-w-0 max-w-[220px] rounded-lg border border-slate-600 bg-slate-900/80 px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-70"
               />
+              <label className="text-sm font-medium text-slate-300">Overlay Directory</label>
+              <div className="flex gap-2 min-w-0">
+                <input
+                  type="text"
+                  value={overlayDirectory}
+                  onChange={(e) => setOverlayDirectory(e.target.value)}
+                  placeholder="e.g. C:\OBS Overlays"
+                  className="flex-1 min-w-0 rounded-lg border border-slate-600 bg-slate-900/80 px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (typeof window === "undefined" || !("showDirectoryPicker" in window)) {
+                      return;
+                    }
+                    try {
+                      const handle = await (window as unknown as { showDirectoryPicker: (opts?: { mode?: string }) => Promise<{ name: string }> }).showDirectoryPicker({ mode: "read" });
+                      setOverlayDirectory(handle.name);
+                      try {
+                        localStorage.setItem(OBS_OVERLAY_DIR_STORAGE_KEY, handle.name);
+                      } catch {
+                        // ignore
+                      }
+                    } catch {
+                      // User cancelled or API not supported
+                    }
+                  }}
+                  title="Select a folder (browser may only provide folder name; type full path if needed)"
+                  className="shrink-0 flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-700/80 px-3 py-2.5 text-slate-200 hover:bg-slate-600/80 transition-colors"
+                >
+                  <FolderOpen className="h-4 w-4" />
+                  Browse
+                </button>
+              </div>
             </div>
               </>
             )}
@@ -893,6 +944,7 @@ export default function OBSDashboard() {
           <div className="mb-4 w-full shrink-0 flex flex-col gap-4">
             <EventAndMatchupEditor
               obsConnected={isConnected}
+              overlayDirectory={overlayDirectory.trim() || undefined}
               renderMarqueeRow={(marqueeContent) => marqueeContent}
               renderSections={({ eventMatchup, standings, playerList, paths, fontSizes }) => (
                 <section className="w-full shrink-0 flex flex-row flex-wrap items-stretch min-h-0 gap-4">

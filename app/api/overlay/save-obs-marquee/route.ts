@@ -5,18 +5,19 @@ import { buildMarqueeOnlyHtml } from "../route";
 import type { MarqueeData } from "../route";
 
 const MARQUEE_TEMPLATE_REPLACE = "<!-- Content updated via updateMarquee(html) over WebSocket -->";
-const OBS_OVERLAYS_DIR = "C:\\OBS Overlays";
-const OBS_MARQUEE_FILE = path.join(OBS_OVERLAYS_DIR, "Marquee.Html");
+const DEFAULT_OBS_OVERLAYS_DIR = "C:\\OBS Overlays";
+const MARQUEE_FILENAME = "Marquee.Html";
 
 /**
  * POST /api/overlay/save-obs-marquee
- * Builds marquee HTML from body.marquee, loads marquee-template.html, replaces the placeholder with the built HTML, and saves to C:\OBS Overlays\Marquee.Html.
+ * Builds marquee HTML from body.marquee, loads marquee-template.html, replaces the placeholder with the built HTML, and saves to the overlay directory (body.overlayDir or default).
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const marquee = body.marquee ?? body;
     const data = marquee as MarqueeData;
+    const overlayDir = typeof body.overlayDir === "string" && body.overlayDir.trim() ? body.overlayDir.trim() : DEFAULT_OBS_OVERLAYS_DIR;
 
     const { marqueeInnerHtml } = buildMarqueeOnlyHtml(data, undefined);
 
@@ -32,10 +33,12 @@ export async function POST(request: NextRequest) {
 
     const updatedHtml = templateHtml.replace(MARQUEE_TEMPLATE_REPLACE, marqueeInnerHtml);
 
-    await mkdir(OBS_OVERLAYS_DIR, { recursive: true });
-    await writeFile(OBS_MARQUEE_FILE, updatedHtml, "utf-8");
+    const marqueeFilePath = path.join(overlayDir, MARQUEE_FILENAME);
+    // Create overlay directory (and any parent path) if it does not exist
+    await mkdir(overlayDir, { recursive: true });
+    await writeFile(marqueeFilePath, updatedHtml, "utf-8");
 
-    return NextResponse.json({ ok: true, path: OBS_MARQUEE_FILE });
+    return NextResponse.json({ ok: true, path: marqueeFilePath });
   } catch (err) {
     console.error("Save OBS marquee error:", err);
     return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });
